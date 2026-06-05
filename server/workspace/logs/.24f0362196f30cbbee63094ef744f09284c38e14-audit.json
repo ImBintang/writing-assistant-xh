@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 30
+    },
+    "auditLog": "D:\\Code\\writing-assistant\\server\\workspace\\logs\\.24f0362196f30cbbee63094ef744f09284c38e14-audit.json",
+    "files": [
+        {
+            "date": 1780676164629,
+            "name": "D:\\Code\\writing-assistant\\server\\workspace\\logs\\app-2026-06-06.log",
+            "hash": "c55053b256ac9dd7744c68d48c92343372c4331333e9877db10c7d978824d148"
+        }
+    ],
+    "hashType": "sha256"
+}
