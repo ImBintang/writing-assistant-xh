@@ -4,3 +4,7 @@ dist/
 *.log
 workspace/*
 !workspace/.workspace.lock
+
+# Claude / IDE generated files
+.claude/
+doc/

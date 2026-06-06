@@ -15,6 +15,7 @@ import {
 } from '../utils/file';
 import { WORKSPACE_VERSION } from '../config/default';
 import { sandboxLogger } from '../utils/logger';
+import { initKnowledgeDb } from '../db/knowledge';
 
 const WORKSPACE_DIRS = [
   'originals',
@@ -26,7 +27,17 @@ const WORKSPACE_DIRS = [
   'knowledge/weapons',
   'knowledge/alchemy',
   'knowledge/plot',
+  'knowledge/_skills',
+  'knowledge/_trash',
   'settings',
+  'settings/characters',
+  'settings/techniques',
+  'settings/plot',
+  'settings/alchemy',
+  'settings/map',
+  'settings/organization',
+  'settings/other',
+  'settings/brainstorm',
   'drafts',
   'logs',
 ];
@@ -77,6 +88,14 @@ export class SandboxManager {
       };
       await fs.writeFile(lockPath, JSON.stringify(lockData, null, 2), 'utf-8');
       sandboxLogger.info(`Created workspace lock file (version ${WORKSPACE_VERSION})`);
+    }
+
+    // Initialize SQLite knowledge index
+    try {
+      await initKnowledgeDb(this.workspaceRoot);
+      sandboxLogger.info('Knowledge DB initialized');
+    } catch (err) {
+      sandboxLogger.warn('Failed to initialize knowledge DB:', err);
     }
   }
 

@@ -42,6 +42,7 @@ function runPython(
   return new Promise((resolve, reject) => {
     const proc = spawn(PYTHON_BINARY, [scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
     });
 
     let stdout = '';
@@ -55,11 +56,11 @@ function runPython(
     }, timeoutMs);
 
     proc.stdout.on('data', (data: Buffer) => {
-      stdout += data.toString();
+      stdout += data.toString('utf-8');
     });
 
     proc.stderr.on('data', (data: Buffer) => {
-      stderr += data.toString();
+      stderr += data.toString('utf-8');
     });
 
     proc.on('close', (code: number | null) => {

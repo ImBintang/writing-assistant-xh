@@ -6,11 +6,48 @@ import DailyRotateFile from 'winston-daily-rotate-file';
 
 const LOG_DIR = path.resolve(process.cwd(), 'workspace', 'logs');
 
+// ==================== API Key Sanitization ====================
+
+/**
+ * Patterns that match API key formats from various providers.
+ * Matches are replaced with [REDACTED] to prevent key leaks in log files.
+ */
+const API_KEY_PATTERNS: Array<RegExp> = [
+  /sk-ant-(?:api\d{2,4}-)?[A-Za-z0-9_-]{20,}/g,  // Anthropic keys
+  /sk-[A-Za-z0-9_-]{20,}/g,                        // OpenAI keys
+  /AIza[A-Za-z0-9_-]{20,}/g,                        // Google AI keys
+  /(?:api_key|apikey|api-key|secret|token|password)\s*[:=]\s*['"][^'"]+['"]/gi, // Generic key assignments
+  /(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|OLLAMA_API_KEY)\s*=\s*[^\s,;]+/gi,       // Env var assignments
+];
+
+/**
+ * Sanitize a log message by redacting any API key patterns.
+ */
+export function sanitizeLogMessage(message: string): string {
+  let sanitized = message;
+  for (const pattern of API_KEY_PATTERNS) {
+    sanitized = sanitized.replace(pattern, (match) => {
+      // Preserve the key name/prefix but redact the value
+      const eqIdx = match.search(/[:=]/);
+      if (eqIdx > 0) {
+        return match.slice(0, eqIdx + 1) + ' [REDACTED]';
+      }
+      return '[REDACTED]';
+    });
+  }
+  return sanitized;
+}
+
+// ==================== Winston Setup ====================
+
 const logFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.printf(({ timestamp, level, message, module }) => {
     const moduleStr = module ? `[${module}]` : '';
-    return `[${timestamp}] [${level.toUpperCase()}] ${moduleStr} ${message}`;
+    const sanitizedMessage = sanitizeLogMessage(
+      typeof message === 'string' ? message : String(message),
+    );
+    return `[${timestamp}] [${level.toUpperCase()}] ${moduleStr} ${sanitizedMessage}`;
   }),
 );
 
