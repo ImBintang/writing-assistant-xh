@@ -10,6 +10,7 @@ import morgan from 'morgan';
 import path from 'path';
 import { createSandbox } from './sandbox';
 import apiRouter from './routes/api';
+import chaptersRouter from './routes/chapters';
 import { appLogger } from './utils/logger';
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -31,6 +32,25 @@ async function main(): Promise<void> {
 
   // API routes
   app.use('/api/v1', apiRouter);
+  app.use('/api/v1/chapters', chaptersRouter);
+
+  // Multer error normalization (before the global error handler)
+  app.use(
+    (
+      err: any,
+      _req: express.Request,
+      _res: express.Response,
+      next: express.NextFunction,
+    ) => {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        err.statusCode = 413;
+        err.message = '文件大小超过限制（最大 50MB）';
+      } else if (err.code === 'INVALID_FILE_TYPE') {
+        err.statusCode = 400;
+      }
+      next(err);
+    },
+  );
 
   // Global error handler
   app.use(

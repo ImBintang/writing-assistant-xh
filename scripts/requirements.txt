@@ -1,2 +1,7 @@
-# PRD-01: No external Python dependencies yet
-# Future PRDs will add dependencies here (e.g., text splitting in PRD-02)
+# PRD-02: No third-party Python dependencies
+# All Python scripts use Python 3.10+ standard library only:
+#   sys, json, os, re, pathlib, hashlib
+#
+# Scripts:
+#   text_splitter.py  - Chapter boundary detection and splitting
+#   split_validator.py - Anomaly detection (orphan_title, missing/duplicate/empty chapters, etc.)

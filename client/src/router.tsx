@@ -1,6 +1,7 @@
 // client/src/router.tsx
 
 import { createHashRouter } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
 import App from './App';
 
 function HomePage() {
@@ -14,6 +15,16 @@ function HomePage() {
   );
 }
 
+const ChaptersPage = lazy(() => import('./pages/Chapters'));
+
+function LoadingFallback() {
+  return (
+    <div className="flex items-center justify-center py-12">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+    </div>
+  );
+}
+
 export const router = createHashRouter([
   {
     path: '/',
@@ -22,6 +33,14 @@ export const router = createHashRouter([
       {
         index: true,
         element: <HomePage />,
+      },
+      {
+        path: 'chapters',
+        element: (
+          <Suspense fallback={<LoadingFallback />}>
+            <ChaptersPage />
+          </Suspense>
+        ),
       },
     ],
   },
