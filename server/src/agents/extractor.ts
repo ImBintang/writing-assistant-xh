@@ -8,6 +8,7 @@ import { runExtractionWithRetry } from './client';
 import { getSkillRegistry } from './skills/registry';
 import { chunkChapter } from '../services/chunker';
 import { mergeExtractionResults } from '../services/knowledge';
+import { recordUsage } from '../utils/context';
 import type {
   ExtractionTask,
   ExtractionInput,
@@ -101,7 +102,22 @@ async function extractWithSkill(
       const result = await runExtractionWithRetry(input, 3);
 
       if (result.entries && result.entries.length > 0) {
+        // Fill excerpt for each entry: extract context around the entry name's first occurrence
+        for (const entry of result.entries) {
+          if (!entry.name) continue;
+          const nameIdx = chunk.content.indexOf(entry.name);
+          if (nameIdx >= 0) {
+            const start = Math.max(0, nameIdx - 100);
+            const end = Math.min(chunk.content.length, nameIdx + entry.name.length + 100);
+            entry.excerpt = chunk.content.slice(start, end);
+          }
+        }
         allEntries.push(...result.entries);
+      }
+
+      // Track token usage
+      if (result.tokensUsed) {
+        recordUsage('extract', result.tokensUsed, 0);
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {

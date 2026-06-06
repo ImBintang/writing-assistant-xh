@@ -1,5 +1,5 @@
 // client/src/pages/Writing.tsx
-// Writing page for PRD-05
+// Writing page — thin shell around WritingLayout
 
 import WritingLayout from '../components/writing/WritingLayout';
 

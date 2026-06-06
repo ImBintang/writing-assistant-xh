@@ -1,4 +1,7 @@
 import { typeLabels } from './AnomalyBadge';
+import { Modal } from '../ui/Modal';
+import { Badge } from '../ui/Badge';
+import { Button } from '../ui/Button';
 import type { AnomalyRecord, ChapterMeta } from '../../services/chapters';
 
 interface AnomalyDetailProps {
@@ -12,6 +15,12 @@ const severityLabels: Record<string, string> = {
   warning: '警告',
   error: '错误',
   info: '提示',
+};
+
+const severityVariant: Record<string, 'warning' | 'error' | 'info'> = {
+  warning: 'warning',
+  error: 'error',
+  info: 'info',
 };
 
 function formatDetailKey(key: string): string {
@@ -41,12 +50,8 @@ function formatDetailValue(value: unknown): string {
   if (typeof value === 'number') {
     return Number.isInteger(value) ? value.toString() : value.toFixed(2);
   }
-  if (Array.isArray(value)) {
-    return value.join(', ');
-  }
-  if (value === null || value === undefined) {
-    return '—';
-  }
+  if (Array.isArray(value)) return value.join(', ');
+  if (value === null || value === undefined) return '—';
   return String(value);
 }
 
@@ -58,101 +63,86 @@ export default function AnomalyDetail({
 }: AnomalyDetailProps) {
   const typeLabel = typeLabels[anomaly.type] || anomaly.type;
   const severityLabel = severityLabels[anomaly.severity] || anomaly.severity;
-
-  const severityColorMap: Record<string, string> = {
-    warning: 'bg-yellow-100 text-yellow-800',
-    error: 'bg-red-100 text-red-800',
-    info: 'bg-blue-100 text-blue-800',
-  };
-  const severityColor = severityColorMap[anomaly.severity] || 'bg-gray-100 text-gray-800';
-
   const details = anomaly.details || {};
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg">
-        {/* Header */}
-        <div className="px-6 py-4 border-b">
-          <div className="flex items-center gap-2">
-            <h3 className="text-lg font-semibold text-gray-800">异常详情</h3>
-            <span
-              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${severityColor}`}
-            >
-              {severityLabel}
-            </span>
+    <Modal
+      open={true}
+      onClose={onClose}
+      title={
+        <div className="flex items-center gap-2">
+          <span>异常详情</span>
+          <Badge variant={severityVariant[anomaly.severity] || 'info'}>
+            {severityLabel}
+          </Badge>
+        </div>
+      }
+      size="lg"
+      footer={
+        <Button variant="secondary" onClick={onClose}>
+          关闭
+        </Button>
+      }
+    >
+      <div className="space-y-4">
+        {/* Type and affected chapter */}
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-sm font-medium text-slate-700">异常类型：</span>
+            <span className="text-sm text-slate-900">{typeLabel}</span>
           </div>
+          {chapter && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-slate-700">涉及章节：</span>
+              <span className="text-sm text-slate-900">
+                #{chapter.index} {chapter.title}
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Body */}
-        <div className="px-6 py-4 space-y-4">
-          {/* Type and affected chapter */}
+        {/* Message */}
+        <div className="bg-slate-50 border border-slate-200 rounded-card p-3">
+          <p className="text-sm text-slate-700">{anomaly.message}</p>
+        </div>
+
+        {/* Details table */}
+        {Object.keys(details).length > 0 && (
           <div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-sm font-medium text-gray-700">异常类型：</span>
-              <span className="text-sm text-gray-900">{typeLabel}</span>
-            </div>
-            {chapter && (
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-700">涉及章节：</span>
-                <span className="text-sm text-gray-900">
-                  #{chapter.index} {chapter.title}
-                </span>
-              </div>
-            )}
+            <h4 className="text-sm font-medium text-slate-700 mb-2">详细信息</h4>
+            <table className="min-w-full text-sm">
+              <tbody className="divide-y divide-slate-100">
+                {Object.entries(details).map(([key, value]) => (
+                  <tr key={key}>
+                    <td className="py-1.5 pr-4 text-slate-500 whitespace-nowrap">
+                      {formatDetailKey(key)}
+                    </td>
+                    <td className="py-1.5 text-slate-900 break-all">
+                      {formatDetailValue(value)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
+        )}
 
-          {/* Message */}
-          <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
-            <p className="text-sm text-gray-700">{anomaly.message}</p>
+        {/* Contextual action for oversized chapters */}
+        {anomaly.type === 'oversized_chapter' && onSplitChapter && (
+          <div className="bg-amber-50 border border-amber-200 rounded-card p-3">
+            <p className="text-sm text-amber-800 mb-2">
+              该章节字数超过平均水平 3 倍，建议拆分为多个小节。
+            </p>
+            <Button
+              onClick={() => onSplitChapter(anomaly.chapterIndex)}
+              className="bg-amber-600 hover:bg-amber-700 from-amber-600 to-amber-600"
+              size="sm"
+            >
+              拆分此章节
+            </Button>
           </div>
-
-          {/* Details table */}
-          {Object.keys(details).length > 0 && (
-            <div>
-              <h4 className="text-sm font-medium text-gray-700 mb-2">详细信息</h4>
-              <table className="min-w-full text-sm">
-                <tbody className="divide-y divide-gray-100">
-                  {Object.entries(details).map(([key, value]) => (
-                    <tr key={key}>
-                      <td className="py-1.5 pr-4 text-gray-500 whitespace-nowrap">
-                        {formatDetailKey(key)}
-                      </td>
-                      <td className="py-1.5 text-gray-900 break-all">
-                        {formatDetailValue(value)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Contextual action for oversized chapters */}
-          {anomaly.type === 'oversized_chapter' && onSplitChapter && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
-              <p className="text-sm text-yellow-800 mb-2">
-                该章节字数超过平均水平 3 倍，建议拆分为多个小节。
-              </p>
-              <button
-                onClick={() => onSplitChapter(anomaly.chapterIndex)}
-                className="px-3 py-1.5 text-sm font-medium text-white bg-yellow-600 rounded-md hover:bg-yellow-700"
-              >
-                拆分此章节
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t bg-gray-50 rounded-b-lg">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-          >
-            关闭
-          </button>
-        </div>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }

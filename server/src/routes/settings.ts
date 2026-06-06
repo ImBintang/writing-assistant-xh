@@ -12,6 +12,7 @@ import {
   migrateConfirmSchema,
 } from '../types/knowledge';
 import { createLogger } from '../utils/logger';
+import { sanitizeMiddleware } from '../middleware/validate';
 
 const logger = createLogger('routes-settings');
 const settingsRouter = Router();
@@ -29,7 +30,7 @@ settingsRouter.get('/', async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/settings — create a new setting file
-settingsRouter.post('/', async (req: Request, res: Response) => {
+settingsRouter.post('/', sanitizeMiddleware(['title', 'content', 'template']), async (req: Request, res: Response) => {
   const parsed = createSettingSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: '参数校验失败', details: parsed.error.errors });
@@ -62,7 +63,7 @@ settingsRouter.get('/:id', async (req: Request, res: Response) => {
 });
 
 // PUT /api/v1/settings/:id — update a setting file
-settingsRouter.put('/:id', async (req: Request, res: Response) => {
+settingsRouter.put('/:id', sanitizeMiddleware(['title', 'content']), async (req: Request, res: Response) => {
   const parsed = updateSettingSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: '参数校验失败', details: parsed.error.errors });

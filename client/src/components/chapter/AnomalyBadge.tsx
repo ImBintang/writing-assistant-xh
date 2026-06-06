@@ -1,3 +1,5 @@
+import { Badge } from '../ui/Badge';
+
 interface AnomalyBadgeProps {
   type: string;
   severity: 'warning' | 'error' | 'info';
@@ -5,10 +7,10 @@ interface AnomalyBadgeProps {
   onClick?: () => void;
 }
 
-const severityColors: Record<string, string> = {
-  warning: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-  error: 'bg-red-100 text-red-800 border-red-300',
-  info: 'bg-blue-100 text-blue-800 border-blue-300',
+const severityVariant: Record<string, 'warning' | 'error' | 'info'> = {
+  warning: 'warning',
+  error: 'error',
+  info: 'info',
 };
 
 export const typeLabels: Record<string, string> = {
@@ -26,19 +28,17 @@ export default function AnomalyBadge({
   message,
   onClick,
 }: AnomalyBadgeProps) {
-  const colorClass = severityColors[severity] || severityColors.info;
   const label = typeLabels[type] || type;
 
   const Tag = onClick ? 'button' : 'span';
-  const cursorClass = onClick ? 'cursor-pointer hover:opacity-80' : '';
 
   return (
     <Tag
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${colorClass} ${cursorClass}`}
+      className={`inline-flex ${onClick ? 'cursor-pointer hover:opacity-80' : ''}`}
       title={message || label}
       onClick={onClick}
     >
-      {label}
+      <Badge variant={severityVariant[severity] || 'info'}>{label}</Badge>
     </Tag>
   );
 }

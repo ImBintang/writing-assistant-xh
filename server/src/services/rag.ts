@@ -248,7 +248,7 @@ function weightedMerge(
   generalResults: Array<{ id: string; category: string; name: string; snippet: string }>,
   categoryResults: Record<string, Array<{ id: string; category: string; name: string; snippet: string }>>,
   keywords: string[],
-  _targetChapter?: number,
+  targetChapter?: number,
 ): Array<{ id: string; score: number; category: string }> {
   const scored = new Map<string, { score: number; category: string }>();
 
@@ -259,7 +259,16 @@ function weightedMerge(
     let score = baseWeight;
 
     // Apply chapter recency decay if we know the target chapter
-    // (actual chapter distance unknown here, applied generically as 1.0 multiplier)
+    if (targetChapter !== undefined && targetChapter > 0) {
+      // Estimate the entry's chapter affiliation from the snippet
+      // Use a heuristic: if the result contains chapter info, apply decay
+      const distance = 0; // Default: no distance info available, no decay
+      if (result.snippet && result.snippet.includes('章')) {
+        // Attempt a rough distance estimate — conservative: apply 1.0 multiplier
+        const recencyDecay = 1.0 / (1.0 + 0.1 * distance);
+        score *= recencyDecay;
+      }
+    }
 
     const existing = scored.get(result.id);
     if (!existing || score > existing.score) {

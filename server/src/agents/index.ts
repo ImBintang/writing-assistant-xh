@@ -96,7 +96,7 @@ export class ExtractionManager {
       throw new Error(`任务不存在: ${taskId}`);
     }
 
-    return {
+    const response: ExtractionStatusResponse = {
       status: task.status,
       progress: {
         totalSteps: task.progress.totalSteps,
@@ -110,6 +110,17 @@ export class ExtractionManager {
           ? (task.errors as ExtractionStatusResponse['errors'])
           : undefined,
     };
+
+    // When task is completed, include result summary
+    if (task.status === 'completed' || task.status === 'failed') {
+      const resultsByCategory: Record<string, number> = {};
+      for (const [category, entries] of Object.entries(task.progress.resultsByCategory)) {
+        resultsByCategory[category] = entries.length;
+      }
+      (response as any).results = resultsByCategory;
+    }
+
+    return response;
   }
 
   /**

@@ -1,19 +1,7 @@
-// client/src/router.tsx
-
 import { createHashRouter } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import App from './App';
-
-function HomePage() {
-  return (
-    <div className="flex items-center justify-center h-full">
-      <div className="text-center">
-        <h2 className="text-2xl font-semibold text-gray-700 mb-2">欢迎使用 AI 写文助手</h2>
-        <p className="text-gray-500">请从上方导航选择功能</p>
-      </div>
-    </div>
-  );
-}
+import HomePage from './pages/Home';
 
 const ChaptersPage = lazy(() => import('./pages/Chapters'));
 const KnowledgePage = lazy(() => import('./pages/Knowledge'));

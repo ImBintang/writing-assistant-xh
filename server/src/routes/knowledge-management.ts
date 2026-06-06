@@ -9,6 +9,7 @@ import {
   createEntry,
   updateEntry,
   deleteEntry,
+  batchDeleteEntries,
   restoreEntry,
   emptyTrash,
   addRelation,
@@ -40,6 +41,7 @@ import {
   addRelationTypeSchema,
 } from '../types/knowledge';
 import { createLogger } from '../utils/logger';
+import { sanitizeMiddleware } from '../middleware/validate';
 
 const logger = createLogger('routes-knowledge-mgmt');
 const knowledgeManagementRouter = Router();
@@ -157,7 +159,7 @@ knowledgeManagementRouter.get('/entries/:id', async (req: Request, res: Response
 /**
  * POST /entries — Create a new knowledge entry
  */
-knowledgeManagementRouter.post('/entries', async (req: Request, res: Response) => {
+knowledgeManagementRouter.post('/entries', sanitizeMiddleware(['name', 'description', 'content']), async (req: Request, res: Response) => {
   try {
     const parsed = createEntrySchema.safeParse(req.body);
     if (!parsed.success) {
@@ -177,7 +179,7 @@ knowledgeManagementRouter.post('/entries', async (req: Request, res: Response) =
 /**
  * PUT /entries/:id — Update an existing entry
  */
-knowledgeManagementRouter.put('/entries/:id', async (req: Request, res: Response) => {
+knowledgeManagementRouter.put('/entries/:id', sanitizeMiddleware(['name', 'description', 'content']), async (req: Request, res: Response) => {
   try {
     const parsed = updateEntrySchema.safeParse(req.body);
     if (!parsed.success) {
@@ -194,6 +196,25 @@ knowledgeManagementRouter.put('/entries/:id', async (req: Request, res: Response
   } catch (err) {
     const message = err instanceof Error ? err.message : '内部错误';
     logger.error('Failed to update entry:', err);
+    res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * POST /entries/batch-delete — Batch soft-delete multiple entries
+ */
+knowledgeManagementRouter.post('/entries/batch-delete', async (req: Request, res: Response) => {
+  try {
+    const { ids } = req.body as { ids: string[] };
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: '请提供要删除的条目ID列表' });
+      return;
+    }
+    const result = await batchDeleteEntries(ids);
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '内部错误';
+    logger.error('Failed to batch delete entries:', err);
     res.status(500).json({ error: message });
   }
 });

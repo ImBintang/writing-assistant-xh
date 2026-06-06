@@ -116,19 +116,30 @@ export async function initKnowledgeDb(workspaceRoot?: string): Promise<void> {
 }
 
 /**
- * Persist the database to disk.
+ * Persist the database to disk (debounced).
  */
+let saveTimer: NodeJS.Timeout | null = null;
+
 async function saveDb(): Promise<void> {
   if (!db) return;
-  try {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    await fs.mkdir(path.dirname(dbPath), { recursive: true });
-    await fs.writeFile(dbPath, buffer);
-    logger.debug('Knowledge DB saved to disk');
-  } catch (err) {
-    logger.error('Failed to save knowledge DB:', err);
+
+  // Debounce: batch rapid writes into a single save
+  if (saveTimer) {
+    clearTimeout(saveTimer);
   }
+
+  saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    try {
+      const data = db!.export();
+      const buffer = Buffer.from(data);
+      await fs.mkdir(path.dirname(dbPath), { recursive: true });
+      await fs.writeFile(dbPath, buffer);
+      logger.debug('Knowledge DB saved to disk');
+    } catch (err) {
+      logger.error('Failed to save knowledge DB:', err);
+    }
+  }, 100);
 }
 
 /**

@@ -329,6 +329,14 @@ export async function mergeExtractionResults(
   }
 
   for (const raw of newEntries) {
+    // Build source info with excerpt from the raw entry if available
+    const entrySource: SourceInfo = {
+      chapter: chapterIndex,
+      chapterTitle,
+      excerpt: raw.excerpt || '',
+      extractedAt: new Date().toISOString(),
+    };
+
     // 1. Try exact name match
     const exactMatch = nameMap.get(raw.name);
 
@@ -350,13 +358,22 @@ export async function mergeExtractionResults(
         ];
       }
 
-      // Merge relations
+      // Merge relations with dedup by targetName + relationType
       if (raw.relations && raw.relations.length > 0) {
-        exactMatch.relations = [...exactMatch.relations, ...raw.relations];
+        const existingKeys = new Set(
+          exactMatch.relations.map((r) => `${r.targetName}|${r.relationType}`),
+        );
+        for (const rel of raw.relations) {
+          const key = `${rel.targetName}|${rel.relationType}`;
+          if (!existingKeys.has(key)) {
+            exactMatch.relations.push(rel);
+            existingKeys.add(key);
+          }
+        }
       }
 
       // Add source
-      exactMatch.source.push(source);
+      exactMatch.source.push(entrySource);
       exactMatch.version += 1;
       exactMatch.updatedAt = new Date().toISOString();
 
@@ -406,10 +423,19 @@ export async function mergeExtractionResults(
         }
 
         if (raw.relations && raw.relations.length > 0) {
-          bestMatch.relations = [...bestMatch.relations, ...raw.relations];
+          const existingKeys = new Set(
+            bestMatch.relations.map((r) => `${r.targetName}|${r.relationType}`),
+          );
+          for (const rel of raw.relations) {
+            const key = `${rel.targetName}|${rel.relationType}`;
+            if (!existingKeys.has(key)) {
+              bestMatch.relations.push(rel);
+              existingKeys.add(key);
+            }
+          }
         }
 
-        bestMatch.source.push(source);
+        bestMatch.source.push(entrySource);
         bestMatch.version += 1;
         bestMatch.updatedAt = new Date().toISOString();
 

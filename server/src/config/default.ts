@@ -67,6 +67,7 @@ export const defaultFunctionMapping: Record<string, string> = {
   polish: 'claude-sonnet',
   brainstorm: 'claude-sonnet',
   chat: 'claude-sonnet',
+  skill_generate: 'claude-sonnet',
 };
 
 export const defaultConfig: SystemConfig = {

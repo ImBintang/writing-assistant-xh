@@ -1,13 +1,15 @@
 // client/src/components/editor/TipTapEditor.tsx
-// TipTap rich text editor wrapper with floating AI toolbar for PRD-05
+// TipTap rich text editor wrapper — Corporate Trust styled
 
-import { useCallback, useState, useEffect, useMemo } from 'react';
+import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import CharacterCount from '@tiptap/extension-character-count';
 import Underline from '@tiptap/extension-underline';
 import { useWriting } from '../../hooks/useWriting';
+import { Button } from '../ui/Button';
 
 interface TipTapEditorProps {
   content: string;
@@ -17,18 +19,13 @@ interface TipTapEditorProps {
   editable?: boolean;
   className?: string;
   showFormattingToolbar?: boolean;
-  editorId?: string; // to distinguish outline vs body instances
+  minHeight?: string;
+  editorId?: string;
 }
 
 export default function TipTapEditor({
-  content,
-  onUpdate,
-  placeholder = '开始写作...',
-  characterLimit,
-  editable = true,
-  className = '',
-  showFormattingToolbar = true,
-  editorId: _editorId = 'editor',
+  content, onUpdate, placeholder = '开始写作...', characterLimit,
+  editable = true, className = '', showFormattingToolbar = true, minHeight, editorId: _editorId = 'editor',
 }: TipTapEditorProps) {
   const polishText = useWriting((s) => s.polishText);
   const expandText = useWriting((s) => s.expandText);
@@ -43,196 +40,147 @@ export default function TipTapEditor({
   const [styleValue, setStyleValue] = useState('');
   const [selectionText, setSelectionText] = useState('');
   const [charCount, setCharCount] = useState(0);
+  const [localAiLoading, setLocalAiLoading] = useState(false);
+  const [bubblePos, setBubblePos] = useState<{ top: number; left: number } | null>(null);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const selectionTextRef = useRef(selectionText);
+  selectionTextRef.current = selectionText;
+  const stylePopupRef = useRef<HTMLDivElement>(null);
 
   const extensions = useMemo(() => [
-    StarterKit.configure({
-      heading: { levels: [1, 2, 3] },
-    }),
-    Placeholder.configure({
-      placeholder,
-    }),
-    CharacterCount.configure({
-      limit: characterLimit,
-    }),
+    StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+    Placeholder.configure({ placeholder }),
+    CharacterCount.configure({ limit: characterLimit }),
     Underline,
   ], [placeholder, characterLimit]);
 
   const editor = useEditor({
-    extensions,
-    content,
-    editable,
-    onUpdate: ({ editor }) => {
-      const html = editor.getHTML();
-      const text = editor.getText();
-      setCharCount(text.length);
-      onUpdate(html, text);
-    },
-    editorProps: {
-      attributes: {
-        class:
-          'prose prose-sm max-w-none focus:outline-none min-h-[200px] px-4 py-3',
-      },
-    },
+    extensions, content, editable,
+    onUpdate: ({ editor }) => { const html = editor.getHTML(); const text = editor.getText(); setCharCount(text.length); onUpdate(html, text); },
+    editorProps: { attributes: { class: `prose prose-sm max-w-none focus:outline-none ${minHeight || 'min-h-[360px]'} px-5 py-4` } },
   });
 
-  // Sync external content changes back into the editor
   useEffect(() => {
     if (editor && !editor.isDestroyed && content !== editor.getHTML()) {
-      // Only update if the cursor isn't active (external change)
-      if (!editor.isFocused) {
-        editor.commands.setContent(content);
-      }
+      if (!editor.isFocused) editor.commands.setContent(content);
     }
   }, [content, editor]);
 
-  // Handle selection for floating toolbar
+  // 根据 window.getSelection() 计算 viewport 相对位置
+  const updateBubblePosition = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) {
+      setBubblePos(null);
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) {
+      setBubblePos(null);
+      return;
+    }
+    // 默认在选区上方居中显示
+    let top = rect.top - 12;
+    // 若选区太靠近视口顶部，改为显示在选区下方
+    if (rect.top < 80) {
+      top = rect.bottom + 12;
+    }
+    const left = rect.left + rect.width / 2;
+    setBubblePos({ top, left: Math.max(10, left) });
+  }, []);
+
   const handleSelectionChange = useCallback(() => {
     if (!editor || editor.isDestroyed) return;
     const { from, to, empty } = editor.state.selection;
     if (!empty && from !== to) {
       const text = editor.state.doc.textBetween(from, to);
       setSelectionText(text);
+      // requestAnimationFrame 确保 DOM 已更新选区位置
+      requestAnimationFrame(() => updateBubblePosition());
+    } else {
+      setSelectionText('');
+      setBubblePos(null);
     }
-  }, [editor]);
+  }, [editor, updateBubblePosition]);
 
-  // Attach selection change listener
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
-    const handleTransaction = () => {
-      handleSelectionChange();
-    };
+    const handleTransaction = () => { handleSelectionChange(); };
     editor.on('selectionUpdate', handleTransaction);
-    return () => {
-      editor.off('selectionUpdate', handleTransaction);
-    };
+    return () => { editor.off('selectionUpdate', handleTransaction); };
   }, [editor, handleSelectionChange]);
 
-  // AI operation handlers
-  const handlePolish = async () => {
-    if (!selectionText || aiLoading) return;
-    const result = await polishText(selectionText);
-    if (result && editor) {
-      // The WritingLayout will handle showing the DiffView
-    }
-  };
-
-  const handleExpand = async () => {
-    if (!selectionText || aiLoading) return;
-    const result = await expandText(selectionText);
-    if (result && editor) {
-      // The WritingLayout will handle showing the DiffView
-    }
-  };
-
-  const handleShorten = async () => {
-    if (!selectionText || aiLoading) return;
-    const result = await shortenText(selectionText);
-    if (result && editor) {
-      // The WritingLayout will handle showing the DiffView
-    }
-  };
-
-  const handleRewrite = async () => {
-    if (!selectionText || aiLoading) return;
-    const result = await rewriteText(selectionText, styleValue);
-    if (result && editor) {
+  // 点击菜单外部时关闭菜单
+  useEffect(() => {
+    const isActive = !!selectionText && selectionText.length > 0;
+    if (!isActive) return;
+    const handleDocMouseDown = (e: MouseEvent) => {
+      // 点击气泡菜单内部 → 不处理
+      if (bubbleRef.current?.contains(e.target as Node)) return;
+      // 点击 StyleInputPopup 内部 → 不处理
+      if (stylePopupRef.current?.contains(e.target as Node)) return;
+      // 点击编辑器内部 → 不处理（让 TipTap 正常处理选区）
+      if (editor?.view.dom.contains(e.target as Node)) return;
+      // 点击外部 → 关闭菜单
+      setSelectionText('');
+      setBubblePos(null);
       setShowStyleInput(false);
-      setStyleValue('');
-    }
-  };
-
-  const handleCustomInstruction = async () => {
-    if (!selectionText || aiLoading || !customInstruction.trim()) return;
-    const result = await polishText(selectionText, customInstruction.trim());
-    if (result && editor) {
       setShowCustomInput(false);
-      setCustomInstruction('');
-    }
-  };
+    };
+    document.addEventListener('mousedown', handleDocMouseDown, true);
+    return () => document.removeEventListener('mousedown', handleDocMouseDown, true);
+  }, [selectionText, editor]);
 
-  const isActive = !!selectionText && selectionText.length > 0;
-  const isLoading = aiLoading && ['polishing', 'expanding', 'shortening', 'rewriting'].includes(aiOperation || '');
+  // 滚动/缩放时重新计算气泡菜单位置
+  useEffect(() => {
+    const isActive = !!selectionText && selectionText.length > 0;
+    if (!isActive) return;
+    const handleUpdate = () => { updateBubblePosition(); };
+    window.addEventListener('scroll', handleUpdate, true);
+    window.addEventListener('resize', handleUpdate);
+    return () => {
+      window.removeEventListener('scroll', handleUpdate, true);
+      window.removeEventListener('resize', handleUpdate);
+    };
+  }, [selectionText, updateBubblePosition]);
+
+  const handlePolish = async () => { if (!selectionTextRef.current || aiLoading) return; const result = await polishText(selectionTextRef.current); if (result && editor) {} };
+  const handleExpand = async () => { if (!selectionTextRef.current || aiLoading) return; const result = await expandText(selectionTextRef.current); if (result && editor) {} };
+  const handleShorten = async () => { if (!selectionTextRef.current || aiLoading) return; const result = await shortenText(selectionTextRef.current); if (result && editor) {} };
+  const handleRewrite = async () => { if (!selectionTextRef.current || aiLoading) return; const result = await rewriteText(selectionTextRef.current, styleValue); if (result && editor) { setShowStyleInput(false); setStyleValue(''); } };
+  const handleCustomInstruction = async () => { if (!selectionTextRef.current || aiLoading || !customInstruction.trim()) return; const result = await polishText(selectionTextRef.current, customInstruction.trim()); if (result && editor) { setShowCustomInput(false); setCustomInstruction(''); } };
+
+  const isActive = !!selectionText && selectionText.length > 0 && bubblePos !== null;
+  const isLoading = (aiLoading || localAiLoading) && ['polishing', 'expanding', 'shortening', 'rewriting', 'foreshadowing'].includes(aiOperation || 'foreshadowing');
 
   return (
     <div className={`relative ${className}`}>
-      {/* Formatting Toolbar */}
       {showFormattingToolbar && editor && (
-        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-gray-200 bg-gray-50 rounded-t-lg flex-wrap">
-          <ToolbarButton
-            active={editor.isActive('bold')}
-            onClick={() => editor.chain().focus().toggleBold().run()}
-            title="加粗"
-          >
-            <strong>B</strong>
-          </ToolbarButton>
-          <ToolbarButton
-            active={editor.isActive('italic')}
-            onClick={() => editor.chain().focus().toggleItalic().run()}
-            title="斜体"
-          >
-            <em>I</em>
-          </ToolbarButton>
-          <ToolbarButton
-            active={editor.isActive('underline')}
-            onClick={() => editor.chain().focus().toggleUnderline().run()}
-            title="下划线"
-          >
-            <u>U</u>
-          </ToolbarButton>
-          <div className="w-px h-5 bg-gray-300 mx-1" />
-          <ToolbarButton
-            active={editor.isActive('heading', { level: 1 })}
-            onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-            title="一级标题"
-          >
-            H1
-          </ToolbarButton>
-          <ToolbarButton
-            active={editor.isActive('heading', { level: 2 })}
-            onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-            title="二级标题"
-          >
-            H2
-          </ToolbarButton>
-          <ToolbarButton
-            active={editor.isActive('heading', { level: 3 })}
-            onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
-            title="三级标题"
-          >
-            H3
-          </ToolbarButton>
-          <div className="w-px h-5 bg-gray-300 mx-1" />
-          <ToolbarButton
-            onClick={() => editor.chain().focus().undo().run()}
-            disabled={!editor.can().undo()}
-            title="撤销"
-          >
-            ↩
-          </ToolbarButton>
-          <ToolbarButton
-            onClick={() => editor.chain().focus().redo().run()}
-            disabled={!editor.can().redo()}
-            title="重做"
-          >
-            ↪
-          </ToolbarButton>
+        <div className="flex items-center gap-1 px-2 py-1.5 border-b border-slate-200 bg-slate-50 rounded-t-lg flex-wrap">
+          <ToolbarButton active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()} title="加粗"><strong>B</strong></ToolbarButton>
+          <ToolbarButton active={editor.isActive('italic')} onClick={() => editor.chain().focus().toggleItalic().run()} title="斜体"><em>I</em></ToolbarButton>
+          <ToolbarButton active={editor.isActive('underline')} onClick={() => editor.chain().focus().toggleUnderline().run()} title="下划线"><u>U</u></ToolbarButton>
+          <div className="w-px h-5 bg-slate-300 mx-1" />
+          <ToolbarButton active={editor.isActive('heading', { level: 1 })} onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} title="一级标题">H1</ToolbarButton>
+          <ToolbarButton active={editor.isActive('heading', { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} title="二级标题">H2</ToolbarButton>
+          <ToolbarButton active={editor.isActive('heading', { level: 3 })} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} title="三级标题">H3</ToolbarButton>
+          <div className="w-px h-5 bg-slate-300 mx-1" />
+          <ToolbarButton onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()} title="撤销">↩</ToolbarButton>
+          <ToolbarButton onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} title="重做">↪</ToolbarButton>
         </div>
       )}
+      <EditorContent editor={editor} className={`${minHeight || 'min-h-[360px]'} ${showFormattingToolbar ? 'rounded-b-lg' : 'rounded-xl'} border border-slate-200 bg-white shadow-[0_4px_20px_-2px_rgba(79,70,229,0.08)]`} />
 
-      {/* Editor Content */}
-      <EditorContent
-        editor={editor}
-        className={`min-h-[200px] ${showFormattingToolbar ? 'rounded-b-lg' : 'rounded-lg'} border border-gray-200 bg-white`}
-      />
-
-      {/* Floating AI Toolbar (appears on text selection) */}
-      {isActive && editor && (
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-full -mt-2 flex items-center gap-1 bg-white border border-gray-300 rounded-lg shadow-lg px-2 py-1.5 z-50">
+      {/* 选中文字气泡菜单 — Portal 到 body，z-[100] 最高图层 */}
+      {isActive && bubblePos && createPortal(
+        <div
+          ref={bubbleRef}
+          className="fixed flex items-center gap-1 bg-white border border-slate-300 rounded-card shadow-modal px-2 py-1.5 z-[100] animate-fade-in"
+          style={{ top: bubblePos.top, left: bubblePos.left, transform: bubblePos.top < 80 ? 'translate(-50%, 0)' : 'translate(-50%, -100%)' }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
           {isLoading ? (
-            <div className="flex items-center gap-2 px-2 py-1 text-sm text-gray-500">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600" />
-              <span>AI 处理中...</span>
-            </div>
+            <div className="flex items-center gap-2 px-2 py-1 text-sm text-slate-500"><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600" /><span>AI 处理中...</span></div>
           ) : (
             <>
               <MenuItem onClick={handlePolish} label="润色此段" />
@@ -240,147 +188,76 @@ export default function TipTapEditor({
               <MenuItem onClick={handleShorten} label="缩写此段" />
               <MenuItem onClick={() => setShowStyleInput(true)} label="改写风格" />
               <MenuItem onClick={() => setShowCustomInput(true)} label="自由指令" />
+              <MenuItem
+                onClick={async () => {
+                  if (!selectionTextRef.current || localAiLoading) return;
+                  setLocalAiLoading(true);
+                  try {
+                    await useWriting.getState().checkForeshadowing();
+                    const findings = useWriting.getState().foreshadowingFindings;
+                    if (findings && findings.length > 0) {
+                      const summary = findings.map((f) =>
+                        `• [${f.severity || 'info'}] ${f.description || '未知问题'}`
+                      ).join('\n');
+                      alert(`伏笔/逻辑检查完成，发现 ${findings.length} 个潜在问题：\n\n${summary}`);
+                    } else {
+                      alert('未发现明显逻辑问题或伏笔遗漏。');
+                    }
+                  } catch (err) {
+                    console.error('检查逻辑失败:', err);
+                    alert('检查逻辑失败，请稍后再试。');
+                  } finally {
+                    setLocalAiLoading(false);
+                  }
+                }}
+                label="检查逻辑"
+              />
             </>
           )}
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Style Input Popup */}
-      {showStyleInput && (
-        <StyleInputPopup
-          value={styleValue}
-          onChange={setStyleValue}
-          onSubmit={handleRewrite}
-          onCancel={() => {
-            setShowStyleInput(false);
-            setStyleValue('');
-          }}
-          placeholder="例如：古龙风格、轻松幽默..."
-        />
+      {/* StyleInputPopup — Portal 到 body，z-[100] */}
+      {showStyleInput && createPortal(
+        <div ref={stylePopupRef} className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white border border-slate-300 rounded-card shadow-modal p-4 z-[100] min-w-[320px] animate-fade-in">
+          <label className="block text-sm font-semibold text-slate-700 mb-2">改写风格</label>
+          <input type="text" value={styleValue} onChange={(e) => setStyleValue(e.target.value)} placeholder="例如：古龙风格、轻松幽默..." className="w-full px-3 py-2 text-sm border border-slate-200 rounded-input focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" autoFocus onKeyDown={(e) => { if (e.key === 'Enter') handleRewrite(); if (e.key === 'Escape') { setShowStyleInput(false); setStyleValue(''); } }} />
+          <div className="flex justify-end gap-2 mt-3">
+            <Button variant="secondary" size="sm" onClick={() => { setShowStyleInput(false); setStyleValue(''); }}>取消</Button>
+            <Button size="sm" onClick={handleRewrite} disabled={!styleValue.trim()}>改写</Button>
+          </div>
+        </div>,
+        document.body
+      )}
+      {showCustomInput && createPortal(
+        <div ref={stylePopupRef} className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white border border-slate-300 rounded-card shadow-modal p-4 z-[100] min-w-[320px] animate-fade-in">
+          <label className="block text-sm font-semibold text-slate-700 mb-2">自由指令</label>
+          <input type="text" value={customInstruction} onChange={(e) => setCustomInstruction(e.target.value)} placeholder="输入自定义需求..." className="w-full px-3 py-2 text-sm border border-slate-200 rounded-input focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" autoFocus onKeyDown={(e) => { if (e.key === 'Enter') handleCustomInstruction(); if (e.key === 'Escape') { setShowCustomInput(false); setCustomInstruction(''); } }} />
+          <div className="flex justify-end gap-2 mt-3">
+            <Button variant="secondary" size="sm" onClick={() => { setShowCustomInput(false); setCustomInstruction(''); }}>取消</Button>
+            <Button size="sm" onClick={handleCustomInstruction} disabled={!customInstruction.trim()}>执行</Button>
+          </div>
+        </div>,
+        document.body
       )}
 
-      {/* Custom Instruction Popup */}
-      {showCustomInput && (
-        <StyleInputPopup
-          value={customInstruction}
-          onChange={setCustomInstruction}
-          onSubmit={handleCustomInstruction}
-          onCancel={() => {
-            setShowCustomInput(false);
-            setCustomInstruction('');
-          }}
-          placeholder="输入自定义需求..."
-          submitLabel="执行"
-        />
-      )}
-
-      {/* Character count */}
-      <div className="text-xs text-gray-400 mt-1 text-right">
-        {charCount.toLocaleString()} 字
-        {characterLimit && (
-          <span> / {characterLimit.toLocaleString()}</span>
-        )}
+      <div className="text-xs text-slate-400 mt-1 text-right">
+        {charCount.toLocaleString()} 字{characterLimit && <span> / {characterLimit.toLocaleString()}</span>}
       </div>
     </div>
   );
 }
 
-// ============================================================
-// Sub-components
-// ============================================================
-
-function ToolbarButton({
-  active = false,
-  disabled = false,
-  onClick,
-  title,
-  children,
-}: {
-  active?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  title: string;
-  children: React.ReactNode;
-}) {
+function ToolbarButton({ active = false, disabled = false, onClick, title, children }: { active?: boolean; disabled?: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={`px-2 py-1 text-xs rounded transition-colors ${
-        active
-          ? 'bg-indigo-100 text-indigo-700 font-medium'
-          : 'text-gray-600 hover:bg-gray-200 hover:text-gray-800'
-      } ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-    >
-      {children}
-    </button>
+    <button type="button" onClick={onClick} disabled={disabled} title={title}
+      className={`px-2 py-1 text-xs rounded transition-colors ${active ? 'bg-indigo-100 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-200 hover:text-slate-800'} ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>{children}</button>
   );
 }
 
 function MenuItem({ onClick, label }: { onClick: () => void; label: string }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="px-2 py-1 text-xs text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 rounded whitespace-nowrap transition-colors cursor-pointer"
-    >
-      {label}
-    </button>
-  );
-}
-
-function StyleInputPopup({
-  value,
-  onChange,
-  onSubmit,
-  onCancel,
-  placeholder,
-  submitLabel = '改写',
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
-  placeholder: string;
-  submitLabel?: string;
-}) {
-  return (
-    <div className="absolute top-12 left-0 bg-white border border-gray-300 rounded-lg shadow-xl p-3 z-50 min-w-[280px]">
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-        autoFocus
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') onSubmit();
-          if (e.key === 'Escape') onCancel();
-        }}
-      />
-      <div className="flex justify-end gap-2 mt-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded cursor-pointer"
-        >
-          取消
-        </button>
-        <button
-          type="button"
-          onClick={onSubmit}
-          disabled={!value.trim()}
-          className={`px-3 py-1 text-xs rounded text-white cursor-pointer ${
-            value.trim()
-              ? 'bg-indigo-600 hover:bg-indigo-700'
-              : 'bg-gray-300 cursor-not-allowed'
-          }`}
-        >
-          {submitLabel}
-        </button>
-      </div>
-    </div>
+    <button type="button" onClick={onClick} className="px-2 py-1 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 rounded whitespace-nowrap transition-colors cursor-pointer">{label}</button>
   );
 }

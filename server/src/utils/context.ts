@@ -8,6 +8,24 @@ import { createLogger } from './logger';
 
 const logger = createLogger('context');
 
+// Cache for lightweight model provider (lazy init)
+let _getProviderForChat: (() => Promise<{ provider: { chat: Function }; modelId: string }>) | null = null;
+
+function getModelProvider(): Promise<{ provider: { chat: Function }; modelId: string }> {
+  if (!_getProviderForChat) {
+    // Lazy import to avoid circular dependency
+    try {
+      const { getProviderForMode } = require('../agents/client');
+      _getProviderForChat = () => getProviderForMode('chat');
+    } catch {
+      _getProviderForChat = async () => {
+        throw new Error('Provider not available');
+      };
+    }
+  }
+  return _getProviderForChat();
+}
+
 // ==================== Types ====================
 
 export interface TruncatableEntry {
@@ -142,24 +160,65 @@ export function truncateConversationHistory(
 /**
  * Generate a summary of older conversation messages.
  *
- * Currently returns a simple truncation-based summary.
- * Future enhancement: use a lightweight model to generate a real summary.
+ * Uses a lightweight model (via chat provider) when messages exceed
+ * the keep limit, and falls back to truncation-based summary if
+ * the AI call fails.
  *
  * @param messages - The messages to summarize
+ * @param maxRecent - Number of most recent messages to keep verbatim (default: 20)
  * @returns A summary string
  */
-export function summarizeConversation(messages: ChatMessage[]): string {
+export async function summarizeConversation(
+  messages: ChatMessage[],
+  maxRecent: number = 20,
+): Promise<string> {
   if (messages.length === 0) return '';
 
-  const truncated = truncateConversationHistory(messages, 20);
-
-  if (truncated.length < messages.length) {
-    const omitted = messages.length - truncated.length;
-    return `[之前讨论了 ${omitted} 条消息。以下是最近的讨论：]\n\n` +
-      truncated.map((m) => `[${m.role === 'user' ? '作者' : 'AI'}] ${m.content.slice(0, 200)}`).join('\n');
+  // If there aren't many messages, just format them directly
+  if (messages.length <= maxRecent) {
+    return messages
+      .map((m) => `[${m.role === 'user' ? '作者' : 'AI'}] ${m.content}`)
+      .join('\n');
   }
 
-  return truncated.map((m) => `[${m.role === 'user' ? '作者' : 'AI'}] ${m.content}`).join('\n');
+  const recent = messages.slice(-maxRecent);
+  const older = messages.slice(0, messages.length - maxRecent);
+
+  // Try LLM-based summarization for older messages
+  try {
+    const { provider, modelId } = await getModelProvider();
+    const olderText = older
+      .map((m) => `[${m.role === 'user' ? '作者' : 'AI'}] ${m.content.slice(0, 500)}`)
+      .join('\n\n');
+
+    const result = await provider.chat({
+      model: modelId,
+      maxTokens: 500,
+      temperature: 0.3,
+      system: '你是一个对话摘要助手。请将以下对话内容总结为简洁的摘要（用中文，不超过200字），保留关键决策和重要讨论点。',
+      messages: [{ role: 'user', content: `请总结以下对话：\n\n${olderText}` }],
+    });
+
+    const textBlocks = result.content.filter((c: { type: string }) => c.type === 'text');
+    const summaryText = textBlocks
+      .map((b: { text: string }) => b.text)
+      .join('\n')
+      .trim();
+
+    if (summaryText) {
+      const recentText = recent
+        .map((m) => `[${m.role === 'user' ? '作者' : 'AI'}] ${m.content}`)
+        .join('\n');
+
+      return `[历史摘要] ${summaryText}\n\n---\n最近讨论：\n${recentText}`;
+    }
+  } catch (err) {
+    logger.warn('LLM conversation summary failed, falling back to truncation:', err);
+  }
+
+  // Fallback: truncation-based summary
+  return `[之前讨论了 ${older.length} 条消息。以下是最近的讨论：]\n\n` +
+    recent.map((m) => `[${m.role === 'user' ? '作者' : 'AI'}] ${m.content.slice(0, 200)}`).join('\n');
 }
 
 // ==================== Token Budget Pre-Flight Check ====================

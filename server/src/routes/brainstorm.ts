@@ -13,6 +13,7 @@ import {
 } from '../types/knowledge';
 import type { ChatMessage } from '../types/knowledge';
 import { createLogger } from '../utils/logger';
+import { sanitizeMiddleware } from '../middleware/validate';
 
 const logger = createLogger('routes-brainstorm');
 const brainstormRouter = Router();
@@ -80,7 +81,7 @@ brainstormRouter.delete('/:id', async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/brainstorm/sessions/:id/message — send a message and get AI reply
-brainstormRouter.post('/:id/message', async (req: Request, res: Response) => {
+brainstormRouter.post('/:id/message', sanitizeMiddleware(['message']), async (req: Request, res: Response) => {
   const parsed = sendMessageSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: '参数校验失败', details: parsed.error.errors });
@@ -154,6 +155,47 @@ brainstormRouter.post('/:id/extract', async (req: Request, res: Response) => {
   } catch (err) {
     logger.error('Failed to extract conclusions:', err);
     res.status(500).json({ error: '提取结论失败' });
+  }
+});
+
+// GET /api/v1/brainstorm/sessions/:id/export — export session as Markdown
+brainstormRouter.get('/:id/export', async (req: Request, res: Response) => {
+  try {
+    const content = await sessionService.getSessionContent(String(req.params.id));
+    if (!content) {
+      res.status(404).json({ error: '会话不存在' });
+      return;
+    }
+
+    const lines: string[] = [];
+    lines.push(`# ${content.session.title}`);
+    lines.push('');
+    lines.push(`> 创建时间: ${content.session.createdAt}`);
+    lines.push(`> 更新时间: ${content.session.updatedAt}`);
+    lines.push(`> 消息数: ${content.session.messageCount}`);
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+
+    for (const msg of content.messages) {
+      const roleLabel = msg.role === 'user' ? '用户' : 'AI';
+      const pinMarker = msg.pinned ? ' 📌' : '';
+      lines.push(`### ${roleLabel} — ${msg.timestamp}${pinMarker}`);
+      lines.push('');
+      lines.push(msg.content);
+      lines.push('');
+    }
+
+    const markdown = lines.join('\n');
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(content.session.title)}.md"`,
+    );
+    res.send(markdown);
+  } catch (err) {
+    logger.error('Failed to export session:', err);
+    res.status(500).json({ error: '导出会话失败' });
   }
 });
 

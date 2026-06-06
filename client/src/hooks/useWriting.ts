@@ -64,8 +64,8 @@ interface WritingState {
   draftManagerOpen: boolean;
 
   // UI
-  sidebarOpen: boolean;
-  knowledgePanelOpen: boolean;
+  drawerOpen: boolean;
+  drawerTab: 'knowledge' | 'assistant';
 
   // Auto-save tracking
   lastSavedAt: string | null;
@@ -123,8 +123,9 @@ interface WritingState {
   // ============================================================
   // Actions — UI
   // ============================================================
-  toggleSidebar: () => void;
-  toggleKnowledgePanel: () => void;
+  toggleDrawer: () => void;
+  openDrawer: (tab?: 'knowledge' | 'assistant') => void;
+  closeDrawer: () => void;
   setDirty: (dirty: boolean) => void;
 }
 
@@ -163,8 +164,8 @@ export const useWriting = create<WritingState>((set, get) => ({
   drafts: [],
   draftsLoading: false,
   draftManagerOpen: false,
-  sidebarOpen: true,
-  knowledgePanelOpen: true,
+  drawerOpen: false,
+  drawerTab: 'assistant',
   lastSavedAt: null,
   isDirty: false,
   lastSavedOutline: '',
@@ -736,12 +737,16 @@ export const useWriting = create<WritingState>((set, get) => ({
   // UI
   // ============================================================
 
-  toggleSidebar: () => {
-    set((s) => ({ sidebarOpen: !s.sidebarOpen }));
+  toggleDrawer: () => {
+    set((s) => ({ drawerOpen: !s.drawerOpen }));
   },
 
-  toggleKnowledgePanel: () => {
-    set((s) => ({ knowledgePanelOpen: !s.knowledgePanelOpen }));
+  openDrawer: (tab) => {
+    set({ drawerOpen: true, ...(tab ? { drawerTab: tab } : {}) });
+  },
+
+  closeDrawer: () => {
+    set({ drawerOpen: false });
   },
 
   setDirty: (dirty: boolean) => {

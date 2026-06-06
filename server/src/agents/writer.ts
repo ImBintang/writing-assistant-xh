@@ -9,6 +9,7 @@ import { estimateTokens } from '../utils/tokenizer';
 import {
   truncateKnowledgeContext,
   checkTokenBudget,
+  recordUsage,
 } from '../utils/context';
 import type { PriorKnowledge, ForeshadowFinding, ForeshadowCheckResponse } from '../types/knowledge';
 import type { ContentBlock, ToolUseBlock } from './client';
@@ -261,6 +262,7 @@ export async function generateChapter(params: {
   const content = extractText(result.content);
   const tokensUsed = result.usage.inputTokens + result.usage.outputTokens;
 
+  recordUsage('write', result.usage.inputTokens, result.usage.outputTokens);
   logger.info(`Chapter generated: tokens=${tokensUsed}, contentLen=${content.length}`);
   return { content, tokensUsed };
 }
@@ -315,6 +317,7 @@ export async function continueWriting(params: {
   const content = extractText(result.content);
   const tokensUsed = result.usage.inputTokens + result.usage.outputTokens;
 
+  recordUsage('write_continue', result.usage.inputTokens, result.usage.outputTokens);
   logger.info(`Continue done: tokens=${tokensUsed}, contentLen=${content.length}`);
   return { content, tokensUsed };
 }
@@ -355,6 +358,7 @@ export async function polishText(params: {
   const polishedText = extractText(result.content);
   const tokensUsed = result.usage.inputTokens + result.usage.outputTokens;
 
+  recordUsage('polish', result.usage.inputTokens, result.usage.outputTokens);
   logger.info(`Polish done: tokens=${tokensUsed}, resultLen=${polishedText.length}`);
   return { polishedText, tokensUsed };
 }
@@ -394,6 +398,7 @@ export async function expandText(params: {
   const content = extractText(result.content);
   const tokensUsed = result.usage.inputTokens + result.usage.outputTokens;
 
+  recordUsage('expand', result.usage.inputTokens, result.usage.outputTokens);
   logger.info(`Expand done: tokens=${tokensUsed}, resultLen=${content.length}`);
   return { content, tokensUsed };
 }
@@ -433,6 +438,7 @@ export async function shortenText(params: {
   const content = extractText(result.content);
   const tokensUsed = result.usage.inputTokens + result.usage.outputTokens;
 
+  recordUsage('shorten', result.usage.inputTokens, result.usage.outputTokens);
   logger.info(`Shorten done: tokens=${tokensUsed}, resultLen=${content.length}`);
   return { content, tokensUsed };
 }
@@ -475,6 +481,7 @@ export async function rewriteText(params: {
   const content = extractText(result.content);
   const tokensUsed = result.usage.inputTokens + result.usage.outputTokens;
 
+  recordUsage('rewrite', result.usage.inputTokens, result.usage.outputTokens);
   logger.info(`Rewrite done: tokens=${tokensUsed}, resultLen=${content.length}`);
   return { content, tokensUsed };
 }
@@ -579,6 +586,8 @@ export async function checkForeshadowing(params: {
   }
 
   const tokensUsed = result.usage.inputTokens + result.usage.outputTokens;
+
+  recordUsage('foreshadowing', result.usage.inputTokens, result.usage.outputTokens);
   logger.info(`Foreshadowing check done: tokens=${tokensUsed}, findings=${findings.length}`);
 
   return {

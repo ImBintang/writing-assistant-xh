@@ -6,6 +6,7 @@ import path from 'path';
 import { getSandbox } from '../sandbox';
 import { createLogger } from '../utils/logger';
 import { uploadMiddleware, normalizeMulterError } from '../middleware/upload';
+import { sanitizeMiddleware } from '../middleware/validate';
 import { splitChapters, validateChapters } from '../services/splitter';
 
 const logger = createLogger('chapters');
@@ -543,7 +544,7 @@ router.get('/:id/raw', async (req: Request, res: Response) => {
 });
 
 // PUT /:id — update chapter
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', sanitizeMiddleware(['title', 'content']), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id as string, 10);
     if (isNaN(id)) {

@@ -6,14 +6,14 @@
 import { getProviderForMode } from './client';
 import { createLogger } from '../utils/logger';
 import { estimateTokens } from '../utils/tokenizer';
-import { truncateConversationHistory } from '../utils/context';
+import { truncateConversationHistory, recordUsage } from '../utils/context';
 import { getEntryById } from '../services/knowledge-management';
 import type { ChatMessage, BrainstormReply, ExtractedConclusions } from '../types/knowledge';
 import type { ToolUseBlock } from './client';
 
 const logger = createLogger('brainstorm-agent');
 
-const MAX_HISTORY_MESSAGES = 8;
+const MAX_HISTORY_MESSAGES = 20;
 const MAX_KNOWLEDGE_CHARS_PER_ENTRY = 500;
 
 /**
@@ -190,6 +190,7 @@ export async function sendBrainstormMessage(params: {
     }
 
     const durationMs = Date.now() - startTime;
+    recordUsage('brainstorm', totalEstimate, estimateTokens(replyText));
     logger.info(
       `Brainstorm reply received: len=${replyText.length}, refs=${references.length}, duration=${durationMs}ms`,
     );

@@ -1,7 +1,80 @@
+/* === Google Fonts === */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-gray-50 text-gray-900 antialiased;
+/* === Base Layer === */
+@layer base {
+  html {
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900;
+  }
+
+  /* 全局 focus ring：indigo + offset */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-indigo-500 ring-offset-1 rounded;
+  }
+}
+
+/* === Component Layer === */
+@layer components {
+  /* 背景模糊装饰球 */
+  .blob-orb {
+    @apply absolute rounded-full blur-3xl opacity-20 pointer-events-none;
+    animation: blob-pulse 8s ease-in-out infinite;
+  }
+
+  /* 渐变文字工具 */
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-violet-600;
+  }
+
+  /* 3D 透视卡片 */
+  .card-3d {
+    transform: perspective(2000px) rotateX(5deg) rotateY(-12deg);
+    transition: transform 0.5s ease;
+  }
+
+  .card-3d:hover {
+    transform: perspective(2000px) rotateX(2deg) rotateY(-4deg);
+  }
+}
+
+/* === Utility Layer === */
+@layer utilities {
+  .perspective-2000 {
+    perspective: 2000px;
+  }
+
+  .rotate-x-5 {
+    transform: rotateX(5deg);
+  }
+
+  .rotate-y-n12 {
+    transform: rotateY(-12deg);
+  }
+
+  /* 滚动条美化 */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 rounded-full;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+  }
 }

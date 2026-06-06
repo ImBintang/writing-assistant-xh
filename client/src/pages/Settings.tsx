@@ -1,12 +1,14 @@
 // client/src/pages/Settings.tsx
-// Setting Conception page (PRD-06)
-// Layout: category sidebar + editor + reference panel + bottom archive
+// Setting Conception page — category sidebar + editor + reference panel
 
 import { useEffect, useState } from 'react';
 import { useSettings, CATEGORY_LABELS, CATEGORY_COLORS } from '../hooks/useSettings';
 import SettingEditor from '../components/settings/SettingEditor';
 import ReferencePanel from '../components/settings/ReferencePanel';
 import MigrateDialog from '../components/settings/MigrateDialog';
+import { Modal } from '../components/ui/Modal';
+import { Input, Select } from '../components/ui/Input';
+import { Button } from '../components/ui/Button';
 
 const CATEGORIES = [
   { key: 'characters', icon: '👤' },
@@ -61,20 +63,45 @@ export default function SettingsPage() {
     }
   };
 
+  const templateOptions = [
+    { value: '', label: '不使用模板' },
+    { value: 'character', label: '角色模板' },
+    { value: 'technique', label: '功法模板' },
+    { value: 'plot', label: '情节模板' },
+    { value: 'alchemy', label: '丹药模板' },
+    { value: 'map', label: '地图模板' },
+    { value: 'organization', label: '组织模板' },
+    { value: 'other', label: '空白模板' },
+  ];
+
   return (
-    <div className="flex h-full" style={{ minHeight: 'calc(100vh - 140px)' }}>
+    <div className="flex h-full" style={{ minHeight: 'calc(100vh - 56px)' }}>
       {/* Left sidebar — categories */}
-      <div className="w-48 border-r border-gray-200 flex flex-col bg-gray-50">
-        <div className="p-3 border-b border-gray-200">
-          <button
+      <div className="w-48 border-r border-slate-200 flex flex-col bg-slate-50">
+        <div className="p-3 border-b border-slate-200 space-y-2">
+          <Button
             onClick={() => {
               setActiveCategory(activeCategory || 'other');
               setShowNewDialog(true);
             }}
-            className="w-full px-3 py-2 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium"
+            className="w-full bg-orange-500 hover:bg-orange-600 from-orange-500 to-orange-500"
           >
             ＋ 新建设定
-          </button>
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              if (filteredSettings.length > 0) {
+                const first = filteredSettings[0];
+                selectSetting(first);
+              }
+            }}
+            disabled={filteredSettings.length === 0}
+            className="w-full"
+            title="打开最近一个已选分类中的设定"
+          >
+            📂 打开已有
+          </Button>
         </div>
 
         <div className="flex-1 overflow-auto p-2 space-y-0.5">
@@ -83,7 +110,7 @@ export default function SettingsPage() {
             className={`w-full px-3 py-2 text-left text-sm rounded-lg transition-colors ${
               activeCategory === null
                 ? 'bg-orange-100 text-orange-700 font-medium'
-                : 'text-gray-600 hover:bg-gray-100'
+                : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             📂 全部 ({settings.length})
@@ -97,14 +124,14 @@ export default function SettingsPage() {
                 className={`w-full px-3 py-2 text-left text-sm rounded-lg transition-colors flex items-center justify-between ${
                   activeCategory === key
                     ? 'bg-orange-100 text-orange-700 font-medium'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
                 <span>
                   {icon} {CATEGORY_LABELS[key] || key}
                 </span>
                 {count > 0 && (
-                  <span className="text-xs px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500">
+                  <span className="text-xs px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-500">
                     {count}
                   </span>
                 )}
@@ -114,14 +141,14 @@ export default function SettingsPage() {
         </div>
 
         {/* Migration button */}
-        <div className="p-3 border-t border-gray-200">
+        <div className="p-3 border-t border-slate-200">
           <button
             onClick={handleMigrate}
             disabled={selectedSettingIds.length === 0}
-            className={`w-full px-3 py-2 text-xs rounded-lg font-medium transition-colors ${
+            className={`w-full px-3 py-2 text-xs rounded-btn font-medium transition-colors ${
               selectedSettingIds.length === 0
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-green-500 text-white hover:bg-green-600'
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                : 'bg-emerald-500 text-white hover:bg-emerald-600'
             }`}
           >
             📦 迁移到知识库
@@ -133,7 +160,7 @@ export default function SettingsPage() {
       {/* Main editor area */}
       <div className="flex-1 flex flex-col">
         {/* Warning banner */}
-        <div className="px-4 py-2 bg-orange-50 border-b border-orange-200 text-xs text-orange-600 flex items-center gap-2">
+        <div className="px-4 py-2 bg-orange-50 border-b-2 border-orange-300 text-xs font-semibold text-orange-700 flex items-center gap-2">
           <span>⚠</span>
           <span>以下设定尚未在正文章节中出现，不会影响知识库</span>
         </div>
@@ -144,20 +171,19 @@ export default function SettingsPage() {
         </div>
 
         {/* Bottom archive bar */}
-        <div className="border-t border-gray-200 bg-gray-50 px-3 py-2">
+        <div className="border-t border-slate-200 bg-slate-50 px-3 py-2">
           <div className="flex items-center gap-2 overflow-x-auto">
-            <span className="text-xs text-gray-400 flex-shrink-0">存档:</span>
+            <span className="text-xs text-slate-400 flex-shrink-0">存档:</span>
             {settingsLoading ? (
-              <span className="text-xs text-gray-400">加载中...</span>
+              <span className="text-xs text-slate-400">加载中...</span>
             ) : filteredSettings.length === 0 ? (
-              <span className="text-xs text-gray-400">暂无设定</span>
+              <span className="text-xs text-slate-400">暂无设定</span>
             ) : (
               filteredSettings.map((setting) => (
                 <button
                   key={setting.id}
                   onClick={() => {
                     selectSetting(setting);
-                    // Also toggle selection for migration with Ctrl/Meta click
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
@@ -165,10 +191,10 @@ export default function SettingsPage() {
                   }}
                   className={`flex-shrink-0 px-2.5 py-1 text-xs rounded-lg border transition-colors truncate max-w-[200px] ${
                     currentSetting?.id === setting.id
-                      ? CATEGORY_COLORS[setting.category] || 'bg-gray-100 border-gray-300'
+                      ? CATEGORY_COLORS[setting.category] || 'bg-slate-100 border-slate-300'
                       : selectedSettingIds.includes(setting.id)
-                        ? 'bg-green-50 border-green-300 text-green-700'
-                        : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                        : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
                   }`}
                   title={`${setting.title} (${setting.status === 'migrated' ? '已迁移' : '草稿'})\n右键选择用于迁移`}
                 >
@@ -178,70 +204,49 @@ export default function SettingsPage() {
               ))
             )}
           </div>
-          <div className="text-xs text-gray-400 mt-1">
+          <div className="text-xs text-slate-400 mt-1">
             💡 右键点击设定可选择用于迁移 | 已选 {selectedSettingIds.length} 个
           </div>
         </div>
       </div>
 
       {/* New setting dialog */}
-      {showNewDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-96 p-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">新建设定</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">标题</label>
-                <input
-                  type="text"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-                  placeholder="设定标题"
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-400"
-                  autoFocus
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">模板（可选）</label>
-                <select
-                  value={newTemplate}
-                  onChange={(e) => setNewTemplate(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-orange-400"
-                >
-                  <option value="">不使用模板</option>
-                  <option value="character">角色模板</option>
-                  <option value="technique">功法模板</option>
-                  <option value="plot">情节模板</option>
-                  <option value="alchemy">丹药模板</option>
-                  <option value="map">地图模板</option>
-                  <option value="organization">组织模板</option>
-                  <option value="other">空白模板</option>
-                </select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 mt-5">
-              <button
-                onClick={() => setShowNewDialog(false)}
-                className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleCreate}
-                disabled={!newTitle.trim()}
-                className={`px-4 py-2 text-sm rounded-lg font-medium text-white transition-colors ${
-                  newTitle.trim()
-                    ? 'bg-orange-500 hover:bg-orange-600'
-                    : 'bg-gray-300 cursor-not-allowed'
-                }`}
-              >
-                创建
-              </button>
-            </div>
-          </div>
+      <Modal
+        open={showNewDialog}
+        onClose={() => setShowNewDialog(false)}
+        title="新建设定"
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowNewDialog(false)}>
+              取消
+            </Button>
+            <Button
+              onClick={handleCreate}
+              disabled={!newTitle.trim()}
+              className="bg-orange-500 hover:bg-orange-600 from-orange-500 to-orange-500"
+            >
+              创建
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Input
+            label="标题"
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+            placeholder="设定标题"
+          />
+          <Select
+            label="模板（可选）"
+            value={newTemplate}
+            onChange={(e) => setNewTemplate(e.target.value)}
+            options={templateOptions}
+          />
         </div>
-      )}
+      </Modal>
 
       {/* Migration dialog */}
       <MigrateDialog />

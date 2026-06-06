@@ -108,6 +108,7 @@ export interface RawKnowledgeEntry {
   attributes: Record<string, unknown>;
   description?: string;
   relations?: Relation[];
+  excerpt?: string;
 }
 
 // ============================================================

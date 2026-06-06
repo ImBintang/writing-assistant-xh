@@ -8,6 +8,7 @@
 // proxied IPs ourselves in a controlled local environment.
 
 import rateLimit from 'express-rate-limit';
+import { appLogger } from '../utils/logger';
 
 const RATE_LIMIT_MESSAGE = '请求过于频繁，请稍后再试';
 
@@ -31,6 +32,12 @@ export const globalLimiter = rateLimit({
   ...rateLimitConfig,
   windowMs: 60 * 1000,
   max: 120,
+  handler: (req, res) => {
+    appLogger.warn(`Rate limit hit (global): IP=${req.ip}, path=${req.path}`);
+    res.status(429).json({
+      error: { message: RATE_LIMIT_MESSAGE, status: 429 },
+    });
+  },
 });
 
 /**
@@ -47,6 +54,12 @@ export const aiLimiter = rateLimit({
       status: 429,
     },
   },
+  handler: (req, res) => {
+    appLogger.warn(`Rate limit hit (AI): IP=${req.ip}, path=${req.path}`);
+    res.status(429).json({
+      error: { message: 'AI 请求过于频繁，请稍后再试', status: 429 },
+    });
+  },
 });
 
 /**
@@ -62,5 +75,11 @@ export const uploadLimiter = rateLimit({
       message: '上传请求过于频繁，请稍后再试',
       status: 429,
     },
+  },
+  handler: (req, res) => {
+    appLogger.warn(`Rate limit hit (upload): IP=${req.ip}, path=${req.path}`);
+    res.status(429).json({
+      error: { message: '上传请求过于频繁，请稍后再试', status: 429 },
+    });
   },
 });

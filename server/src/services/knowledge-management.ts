@@ -300,6 +300,30 @@ export async function deleteEntry(id: string): Promise<KnowledgeEntry | null> {
 }
 
 /**
+ * Batch soft-delete multiple entries by ID.
+ * Returns count of successfully deleted entries.
+ */
+export async function batchDeleteEntries(ids: string[]): Promise<{ deleted: number; errors: string[] }> {
+  let deleted = 0;
+  const errors: string[] = [];
+
+  for (const id of ids) {
+    try {
+      const result = await deleteEntry(id);
+      if (result) {
+        deleted++;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push(`删除 ${id} 失败: ${message}`);
+    }
+  }
+
+  logger.info(`Batch deleted ${deleted}/${ids.length} entries`);
+  return { deleted, errors };
+}
+
+/**
  * Restore an entry from trash to its original category.
  */
 export async function restoreEntry(id: string): Promise<KnowledgeEntry | null> {

@@ -5,6 +5,7 @@ import MergeModal from '../components/chapter/MergeModal';
 import ConfirmDialog from '../components/chapter/ConfirmDialog';
 import AnomalyDetail from '../components/chapter/AnomalyDetail';
 import { useChapters } from '../hooks/useChapters';
+import { PageShell } from '../components/ui/PageShell';
 
 export default function ChaptersPage() {
   const {
@@ -26,18 +27,16 @@ export default function ChaptersPage() {
   } = useChapters();
 
   return (
-    <div className="max-w-5xl mx-auto">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-800 mb-1">章节管理</h2>
-        <p className="text-sm text-gray-500">
-          {status === 'confirmed'
-            ? '拆分结果已确认'
-            : sourceFile
-              ? `来源: ${sourceFile} · ${totalChapters} 章`
-              : '上传 txt 文件，自动拆分为独立章节'}
-        </p>
-      </div>
-
+    <PageShell
+      heading="章节管理"
+      description={
+        status === 'confirmed'
+          ? '拆分结果已确认'
+          : sourceFile
+            ? `来源: ${sourceFile} · ${totalChapters} 章`
+            : '上传 txt 文件，自动拆分为独立章节'
+      }
+    >
       {/* Upload area — always visible but less prominent after initial upload */}
       <Uploader />
 
@@ -64,6 +63,6 @@ export default function ChaptersPage() {
           }}
         />
       )}
-    </div>
+    </PageShell>
   );
 }

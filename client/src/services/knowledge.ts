@@ -91,6 +91,7 @@ export interface CreateSkillRequest {
   description: string;
   promptTemplate?: string;
   outputSchema?: Record<string, unknown>;
+  enabled?: boolean;
 }
 
 export interface UpdateSkillRequest {
