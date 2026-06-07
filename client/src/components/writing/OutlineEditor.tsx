@@ -3,23 +3,14 @@
 
 import TipTapEditor from '../editor/TipTapEditor';
 import { useWriting } from '../../hooks/useWriting';
-import { Button } from '../ui/Button';
 
 export default function OutlineEditor() {
   const mode = useWriting((s) => s.mode);
   const outline = useWriting((s) => s.outline);
   const setOutline = useWriting((s) => s.setOutline);
-  const generateChapter = useWriting((s) => s.generateChapter);
   const retrieveKnowledge = useWriting((s) => s.retrieveKnowledge);
-  const aiLoading = useWriting((s) => s.aiLoading);
 
   if (mode === 'body') return null;
-
-  const handleGenerateFromOutline = async () => {
-    if (!outline.trim()) return;
-    await retrieveKnowledge(outline);
-    await generateChapter(outline);
-  };
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -30,8 +21,11 @@ export default function OutlineEditor() {
           <span className="text-xs font-semibold text-amber-700">作者在此写大纲要点</span>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={() => retrieveKnowledge(outline)} className="border-amber-300 text-amber-700 hover:bg-amber-100">检索知识</Button>
-          <Button size="sm" onClick={handleGenerateFromOutline} disabled={aiLoading || !outline.trim()} isLoading={aiLoading} className="bg-amber-600 hover:bg-amber-700 from-amber-600 to-amber-600">基于大纲撰写正文</Button>
+          <button
+            type="button"
+            onClick={() => retrieveKnowledge(outline)}
+            className="px-3 py-1.5 text-xs font-medium text-amber-800 bg-amber-200 hover:bg-amber-300 rounded-lg shadow-[0_2px_8px_rgba(217,119,6,0.3)] transition-all duration-200 cursor-pointer"
+          >检索知识</button>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-6 py-4">

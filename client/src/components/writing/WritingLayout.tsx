@@ -20,7 +20,7 @@ export default function WritingLayout() {
     showDiff, diffOriginal, diffModified, diffChanges, diffMode,
     acceptSuggestion, rejectSuggestion,
     drawerTab, openDrawer,
-    retrieveKnowledge, outline,
+    retrieveKnowledge, outline, generateChapter, aiLoading,
   } = useWriting();
 
   const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -44,6 +44,12 @@ export default function WritingLayout() {
   }, [saveDraft]);
 
   const handleBodyUpdate = useCallback((_html: string, text: string) => { setBody(text); }, [setBody]);
+
+  const handleGenerateFromOutline = useCallback(async () => {
+    if (!outline.trim()) return;
+    await retrieveKnowledge(outline);
+    await generateChapter(outline);
+  }, [outline, retrieveKnowledge, generateChapter]);
 
   const handleAccept = () => {
     if (diffMode === 'generate' || diffMode === 'continue') acceptSuggestion(diffModified);
@@ -114,7 +120,14 @@ export default function WritingLayout() {
                     <span className="text-sm font-bold text-indigo-900">正文预览</span>
                     <span className="text-xs font-semibold text-indigo-700">AI 根据左侧大纲自动润色扩写为正文</span>
                   </div>
-                  <span className="text-xs font-medium text-indigo-500 flex-shrink-0">💡 自动润色扩写</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleGenerateFromOutline}
+                      disabled={aiLoading || !outline.trim()}
+                      className="px-3 py-1.5 text-xs font-medium text-indigo-800 bg-indigo-200 hover:bg-indigo-300 rounded-lg shadow-[0_2px_8px_rgba(79,70,229,0.35)] transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >基于大纲撰写正文</button>
+                  </div>
                 </div>
                 {showDiff && (
                   <div className="mx-4 mt-3">
