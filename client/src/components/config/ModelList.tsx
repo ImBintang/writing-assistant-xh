@@ -16,9 +16,35 @@ interface NewModelForm {
 const EMPTY_FORM: NewModelForm = { id: '', name: '', provider: 'claude', modelId: '', apiKeyEnv: '', baseUrl: '', description: '' };
 
 export default function ModelList() {
-  const { models, testingModelId, testResult, showAddModelForm, saving, addModel, deleteModel, testModelConnection, setShowAddModelForm, clearMessages } = useConfig();
+  const { config, models, testingModelId, testResult, showAddModelForm, saving, addModel, deleteModel, testModelConnection, setShowAddModelForm, clearMessages } = useConfig();
   const [form, setForm] = useState<NewModelForm>(EMPTY_FORM);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  const apiKeyStatus = (config?.apiKeyStatus || {}) as Record<string, { configured: boolean; envVar: string; source: 'env' | 'user-config' | 'none' }>;
+
+  // Build env var options with configuration status
+  const envVarToProvider: Record<string, string> = {
+    ANTHROPIC_API_KEY: 'claude',
+    OPENAI_API_KEY: 'openai',
+    OLLAMA_API_KEY: 'ollama',
+  };
+  const envVarOptions = (['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OLLAMA_API_KEY'] as const).map((envVar) => {
+    const status = apiKeyStatus[envVarToProvider[envVar]];
+    const configured = status?.configured;
+    const source = status?.source;
+    let statusLabel = '';
+    if (configured) {
+      statusLabel = source === 'env' ? '（✓ 环境变量已配置）' : '（✓ 用户设置已配置）';
+    } else {
+      statusLabel = '（✗ 未配置）';
+    }
+    return { value: envVar, label: `${envVar}  ${statusLabel}` };
+  });
+
+  const handleProviderChange = (provider: ModelPreset['provider']) => {
+    const envVarMap: Record<string, string> = { claude: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY', ollama: 'OLLAMA_API_KEY' };
+    setForm({ ...form, provider, apiKeyEnv: envVarMap[provider] || form.apiKeyEnv });
+  };
 
   const handleAdd = async () => { if (!form.id || !form.name || !form.modelId || !form.apiKeyEnv) return; await addModel({ id: form.id, name: form.name, provider: form.provider, modelId: form.modelId, apiKeyEnv: form.apiKeyEnv, baseUrl: form.baseUrl || undefined, description: form.description || undefined }); setForm(EMPTY_FORM); };
   const handleDelete = async (id: string) => { await deleteModel(id); setDeleteConfirm(null); };
@@ -44,9 +70,9 @@ export default function ModelList() {
           <div className="grid grid-cols-2 gap-3">
             <Input label="ID (唯一标识)" value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value })} placeholder="my-custom-model" />
             <Input label="显示名称" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="My Custom Model" />
-            <Select label="提供商" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value as ModelPreset['provider'] })} options={providerOptions} />
+            <Select label="提供商" value={form.provider} onChange={(e) => handleProviderChange(e.target.value as ModelPreset['provider'])} options={providerOptions} />
             <Input label="模型 ID" value={form.modelId} onChange={(e) => setForm({ ...form, modelId: e.target.value })} placeholder="gpt-4o" />
-            <Input label="API Key 环境变量名" value={form.apiKeyEnv} onChange={(e) => setForm({ ...form, apiKeyEnv: e.target.value })} placeholder="OPENAI_API_KEY" />
+            <Select label="API Key 环境变量" value={form.apiKeyEnv} onChange={(e) => setForm({ ...form, apiKeyEnv: e.target.value })} options={envVarOptions} />
             <Input label="Base URL (可选)" value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="http://localhost:11434" />
             <div className="col-span-2">
               <Input label="描述" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="模型描述..." />

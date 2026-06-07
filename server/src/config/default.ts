@@ -8,6 +8,10 @@ export interface ModelPreset {
   apiKeyEnv: string;
   baseUrl?: string;
   description: string;
+  /** When `false`, explicitly disables extended thinking for this model.
+   * Useful for backends like DeepSeek that force thinking on by default
+   * and reject `tool_choice: { type: 'tool', name: '...' }`. */
+  thinkingEnabled?: boolean;
 }
 
 export interface SystemConfig {

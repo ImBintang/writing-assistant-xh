@@ -14,6 +14,9 @@ import {
   updateFunctionMapping as apiUpdateFunctionMapping,
   testConnection as apiTestConnection,
   fetchContextUsage,
+  updateApiKey,
+  deleteApiKey,
+  reloadEnv,
 } from '../services/config';
 
 // ==================== Human-readable labels ====================
@@ -56,6 +59,11 @@ interface ConfigState {
   error: string | null;
   successMessage: string | null;
 
+  // API key UI state
+  editingProvider: string | null;
+  apiKeyInput: string;
+  showApiKeyInput: boolean;
+
   // Actions
   loadConfig: () => Promise<void>;
   saveConfig: (data: Parameters<typeof updateConfig>[0]) => Promise<void>;
@@ -68,6 +76,14 @@ interface ConfigState {
   loadContextUsage: () => Promise<void>;
   setShowAddModelForm: (show: boolean) => void;
   clearMessages: () => void;
+
+  // API key actions
+  setEditingProvider: (provider: string | null) => void;
+  setApiKeyInput: (value: string) => void;
+  toggleShowApiKey: () => void;
+  saveApiKey: (provider: string, key: string) => Promise<void>;
+  removeApiKey: (provider: string) => Promise<void>;
+  reloadEnvVars: () => Promise<void>;
 }
 
 export const useConfig = create<ConfigState>((set, get) => ({
@@ -83,6 +99,10 @@ export const useConfig = create<ConfigState>((set, get) => ({
   showAddModelForm: false,
   error: null,
   successMessage: null,
+
+  editingProvider: null,
+  apiKeyInput: '',
+  showApiKeyInput: false,
 
   loadConfig: async () => {
     set({ loading: true, error: null });
@@ -211,4 +231,60 @@ export const useConfig = create<ConfigState>((set, get) => ({
   setShowAddModelForm: (show) => set({ showAddModelForm: show }),
 
   clearMessages: () => set({ error: null, successMessage: null, testResult: null }),
+
+  // ==================== API Key Actions ====================
+
+  setEditingProvider: (provider) => set({ editingProvider: provider, apiKeyInput: '', error: null }),
+
+  setApiKeyInput: (value) => set({ apiKeyInput: value }),
+
+  toggleShowApiKey: () => set((s) => ({ showApiKeyInput: !s.showApiKeyInput })),
+
+  saveApiKey: async (provider, key) => {
+    set({ saving: true, error: null, successMessage: null });
+    try {
+      const result = await updateApiKey(provider, key);
+      set((s) => ({
+        saving: false,
+        editingProvider: null,
+        apiKeyInput: '',
+        showApiKeyInput: false,
+        successMessage: result.message,
+        config: s.config ? { ...s.config, apiKeyStatus: result.apiKeyStatus } : s.config,
+      }));
+      setTimeout(() => set({ successMessage: null }), 3000);
+    } catch (err) {
+      set({ saving: false, error: err instanceof Error ? err.message : '保存 API Key 失败' });
+    }
+  },
+
+  removeApiKey: async (provider) => {
+    set({ saving: true, error: null, successMessage: null });
+    try {
+      const result = await deleteApiKey(provider);
+      set((s) => ({
+        saving: false,
+        successMessage: result.message,
+        config: s.config ? { ...s.config, apiKeyStatus: result.apiKeyStatus } : s.config,
+      }));
+      setTimeout(() => set({ successMessage: null }), 3000);
+    } catch (err) {
+      set({ saving: false, error: err instanceof Error ? err.message : '删除 API Key 失败' });
+    }
+  },
+
+  reloadEnvVars: async () => {
+    set({ saving: true, error: null, successMessage: null });
+    try {
+      const result = await reloadEnv();
+      set((s) => ({
+        saving: false,
+        successMessage: result.message,
+        config: s.config ? { ...s.config, apiKeyStatus: result.apiKeyStatus } : s.config,
+      }));
+      setTimeout(() => set({ successMessage: null }), 3000);
+    } catch (err) {
+      set({ saving: false, error: err instanceof Error ? err.message : '刷新环境变量失败' });
+    }
+  },
 }));

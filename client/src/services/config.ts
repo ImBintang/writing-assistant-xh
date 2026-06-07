@@ -14,6 +14,8 @@ export interface ModelPreset {
   apiKeyEnv: string;
   baseUrl?: string;
   description?: string;
+  /** When false, disables extended thinking for this model. */
+  thinkingEnabled?: boolean;
 }
 
 export interface ContextConfig {
@@ -30,7 +32,7 @@ export interface SystemConfig {
   };
   context: ContextConfig;
   functionMapping?: Record<string, string>;
-  apiKeyStatus?: Record<string, { configured: boolean; envVar: string }>;
+  apiKeyStatus?: Record<string, { configured: boolean; envVar: string; source: 'env' | 'user-config' | 'none' }>;
 }
 
 export interface TestConnectionResult {
@@ -63,6 +65,14 @@ export interface ContextUsage {
       totalOutputTokens: number;
     }
   >;
+}
+
+export interface ApiKeyStatus {
+  [provider: string]: {
+    configured: boolean;
+    envVar: string;
+    source: 'env' | 'user-config' | 'none';
+  };
 }
 
 // ==================== API Functions ====================
@@ -125,5 +135,27 @@ export async function fetchContextUsage(): Promise<ContextUsage> {
 
 export async function validatePath(path: string): Promise<{ valid: boolean; resolvedPath?: string; message: string }> {
   const response = await api.post('/api/v1/config/system/validate-path', { path });
+  return response.data;
+}
+
+export async function updateApiKey(
+  provider: string,
+  key: string,
+): Promise<{ message: string; apiKeyStatus: ApiKeyStatus }> {
+  const response = await api.put('/api/v1/config/api-keys', { provider, key });
+  return response.data;
+}
+
+export async function deleteApiKey(
+  provider: string,
+): Promise<{ message: string; apiKeyStatus: ApiKeyStatus }> {
+  const response = await api.delete(`/api/v1/config/api-keys/${encodeURIComponent(provider)}`);
+  return response.data;
+}
+
+export async function reloadEnv(): Promise<{ message: string; apiKeyStatus: ApiKeyStatus }> {
+  const response = await api.post<{ message: string; apiKeyStatus: ApiKeyStatus }>(
+    '/api/v1/config/system/reload-env',
+  );
   return response.data;
 }

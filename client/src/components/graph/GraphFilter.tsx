@@ -51,7 +51,7 @@ export default function GraphFilter({ collapsed, onToggle }: Props) {
         <label className="text-xs font-medium text-slate-600 block mb-1">按分类筛选</label>
         <div className="space-y-1">
           {ALL_CATEGORIES.map((cat) => {
-            const isSelected = (graphFilters.categories || []).length === 0 || graphFilters.categories.includes(cat);
+            const isSelected = (graphFilters.categories || []).includes(cat);
             return (
               <label key={cat} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
                 <input type="checkbox" checked={isSelected} onChange={() => toggleCategory(cat)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
@@ -66,7 +66,7 @@ export default function GraphFilter({ collapsed, onToggle }: Props) {
           <label className="text-xs font-medium text-slate-600 block mb-1">按关系类型筛选</label>
           <div className="space-y-1 max-h-40 overflow-y-auto">
             {relationTypes.map((rt) => {
-              const isSelected = (graphFilters.relationTypes || []).length === 0 || graphFilters.relationTypes.includes(rt.id);
+              const isSelected = (graphFilters.relationTypes || []).includes(rt.id);
               return (
                 <label key={rt.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-slate-50 rounded px-1 py-0.5">
                   <input type="checkbox" checked={isSelected} onChange={() => toggleRelationType(rt.id)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />

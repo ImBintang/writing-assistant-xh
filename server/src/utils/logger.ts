@@ -16,6 +16,7 @@ const API_KEY_PATTERNS: Array<RegExp> = [
   /sk-ant-(?:api\d{2,4}-)?[A-Za-z0-9_-]{20,}/g,  // Anthropic keys
   /sk-[A-Za-z0-9_-]{20,}/g,                        // OpenAI keys
   /AIza[A-Za-z0-9_-]{20,}/g,                        // Google AI keys
+  /"(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|OLLAMA_API_KEY)"\s*:\s*"[^"]+"/gi, // JSON key-value pairs
   /(?:api_key|apikey|api-key|secret|token|password)\s*[:=]\s*['"][^'"]+['"]/gi, // Generic key assignments
   /(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|OLLAMA_API_KEY)\s*=\s*[^\s,;]+/gi,       // Env var assignments
 ];

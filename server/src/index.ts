@@ -1,14 +1,14 @@
 // server/src/index.ts
 
-// Load .env before anything else
+// Load .env before anything else — resolve from monorepo root
 import dotenv from 'dotenv';
-dotenv.config();
+import path from 'path';
+dotenv.config({ path: path.resolve(__dirname, '..', '..', '.env') });
 
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
-import path from 'path';
 import { createSandbox } from './sandbox';
 import { createExtractionManager } from './agents';
 import { createSkillRegistry } from './agents/skills/registry';
@@ -128,10 +128,28 @@ async function main(): Promise<void> {
   appLogger.info('WebSocket server attached');
 
   // Start server
-  httpServer.listen(PORT, () => {
+  const server = httpServer.listen(PORT, () => {
     appLogger.info(`Server listening on http://localhost:${PORT}`);
     appLogger.info(`Health check: http://localhost:${PORT}/api/v1/health`);
   });
+
+  // Graceful shutdown — ensures port is released on Ctrl+C / SIGBREAK
+  const shutdown = (signal: string) => {
+    appLogger.info(`${signal} received, shutting down gracefully...`);
+    server.close(() => {
+      appLogger.info('HTTP server closed');
+      process.exit(0);
+    });
+    // Force exit if hanging after 5s
+    setTimeout(() => {
+      appLogger.warn('Forced shutdown after timeout');
+      process.exit(1);
+    }, 5000).unref();
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGBREAK', () => shutdown('SIGBREAK'));
 }
 
 main().catch((err) => {

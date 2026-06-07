@@ -1,7 +1,7 @@
 // client/src/components/writing/WritingLayout.tsx
 // Main writing window layout — Corporate Trust styled
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import TipTapEditor from '../editor/TipTapEditor';
 import DiffView from '../editor/DiffView';
 import OutlineEditor from './OutlineEditor';
@@ -10,6 +10,7 @@ import AiToolbar from './AiToolbar';
 import WritingSidebar from './WritingSidebar';
 import DraftManager from './DraftManager';
 import { Drawer } from '../ui/Drawer';
+import { Button } from '../ui/Button';
 import { useWriting } from '../../hooks/useWriting';
 
 
@@ -17,11 +18,14 @@ export default function WritingLayout() {
   const {
     mode, setMode, body, setBody, title, setTitle,
     targetChapter, setTargetChapter, isDirty, saveDraft,
+    editSource, linkedChapterIndex, loadChapter,
     showDiff, diffOriginal, diffModified, diffChanges, diffMode,
     acceptSuggestion, rejectSuggestion,
     drawerTab, openDrawer,
     retrieveKnowledge, outline, generateChapter, aiLoading,
   } = useWriting();
+
+  const [chapterLoadInput, setChapterLoadInput] = useState<string>('');
 
   const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isDirtyRef = useRef(isDirty);
@@ -56,6 +60,13 @@ export default function WritingLayout() {
     else acceptSuggestion(diffModified);
   };
 
+  const handleLoadChapter = useCallback(() => {
+    const idx = parseInt(chapterLoadInput, 10);
+    if (isNaN(idx) || idx < 1) return;
+    loadChapter(idx);
+    setChapterLoadInput('');
+  }, [chapterLoadInput, loadChapter]);
+
   return (
     <div className="flex flex-col h-[calc(100vh-56px)]" onBlur={handleBlur} tabIndex={-1}>
       {/* Header — Corporate Trust styled */}
@@ -78,6 +89,27 @@ export default function WritingLayout() {
           />
           <label className="text-xs text-slate-500 font-medium">章</label>
         </div>
+
+        {/* 从章节系统加载已有章节 */}
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            value={chapterLoadInput}
+            onChange={(e) => setChapterLoadInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleLoadChapter(); }}
+            placeholder="加载章节"
+            min={1}
+            className="w-24 px-2 py-1.5 text-sm text-center border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 transition-all duration-200 placeholder:text-slate-400"
+          />
+          <Button size="sm" variant="secondary" onClick={handleLoadChapter}>加载</Button>
+        </div>
+
+        {/* 编辑状态指示 */}
+        {editSource === 'chapter' && linkedChapterIndex !== null && (
+          <span className="text-xs text-indigo-600 font-medium bg-indigo-50 px-2 py-1 rounded-md">
+            📄 第{linkedChapterIndex}章
+          </span>
+        )}
 
         {/* Mode toggle — Corporate Trust gradient active state */}
         <div className="flex items-center bg-slate-100 rounded-lg p-0.5">

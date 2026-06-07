@@ -16,6 +16,9 @@ import {
   getApiKeyStatus,
   loadUserConfig,
   saveUserConfig,
+  setApiKey,
+  deleteApiKey,
+  reloadEnvVars,
 } from '../services/config';
 import { appLogger } from '../utils/logger';
 import { buildContextUsageReport } from '../utils/context';
@@ -34,6 +37,7 @@ const modelPresetSchema = z.object({
   apiKeyEnv: z.string().min(1).max(100),
   baseUrl: z.string().optional(),
   description: z.string().max(500).optional(),
+  thinkingEnabled: z.boolean().optional(),
 });
 
 const functionMappingSchema = z.record(z.string(), z.string());
@@ -52,6 +56,13 @@ const configUpdateSchema = z.object({
     })
     .optional(),
   functionMapping: z.record(z.string(), z.string()).optional(),
+});
+
+const apiKeyUpdateSchema = z.object({
+  provider: z.enum(['claude', 'openai', 'ollama'], {
+    errorMap: () => ({ message: 'provider 必须是 claude、openai 或 ollama' }),
+  }),
+  key: z.string().min(1, 'API Key 不能为空').max(500, 'API Key 长度不能超过 500 字符'),
 });
 
 // ==================== Config CRUD ====================
@@ -200,6 +211,65 @@ router.post('/models/:id/test', async (req: Request, res: Response) => {
   }
 });
 
+// ==================== API Key Management ====================
+
+/**
+ * PUT /api-keys — Set or update an API key for a provider.
+ * Key is write-only: the response only returns status, never the key value.
+ */
+router.put('/api-keys', async (req: Request, res: Response) => {
+  try {
+    const parsed = apiKeyUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: {
+          message: 'API Key 配置格式无效',
+          details: parsed.error.issues,
+          status: 400,
+        },
+      });
+      return;
+    }
+
+    const { provider, key } = parsed.data;
+    await setApiKey(provider, key);
+
+    // Only return status, never the key value
+    const apiKeyStatus = getApiKeyStatus();
+    res.json({
+      message: `API Key 已更新（${provider}）`,
+      apiKeyStatus,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const statusCode = (err as any).statusCode || 500;
+    appLogger.error(`PUT /config/api-keys failed: ${message}`);
+    res.status(statusCode).json({ error: { message, status: statusCode } });
+  }
+});
+
+/**
+ * DELETE /api-keys/:provider — Delete a user-configured API key.
+ * Does NOT affect keys set via .env file.
+ */
+router.delete('/api-keys/:provider', async (req: Request, res: Response) => {
+  try {
+    const provider = String(req.params.provider);
+    await deleteApiKey(provider);
+
+    const apiKeyStatus = getApiKeyStatus();
+    res.json({
+      message: `API Key 已删除（${provider}）`,
+      apiKeyStatus,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const statusCode = (err as any).statusCode || 500;
+    appLogger.error(`DELETE /config/api-keys/:provider failed: ${message}`);
+    res.status(statusCode).json({ error: { message, status: statusCode } });
+  }
+});
+
 // ==================== Function Mapping ====================
 
 /**
@@ -242,6 +312,26 @@ router.put('/function-mapping', async (req: Request, res: Response) => {
 });
 
 // ==================== System Endpoints ====================
+
+/**
+ * POST /system/reload-env — Reload environment variables from .env file.
+ * Uses dotenv with override: true so updated .env values win over process.env.
+ * Returns the updated API key status for each provider.
+ */
+router.post('/system/reload-env', (_req: Request, res: Response) => {
+  try {
+    const apiKeyStatus = reloadEnvVars();
+    res.json({
+      message: '.env 文件已重新加载，环境变量已更新',
+      apiKeyStatus,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const statusCode = (err as any).statusCode || 500;
+    appLogger.error(`POST /config/system/reload-env failed: ${message}`);
+    res.status(statusCode).json({ error: { message, status: statusCode } });
+  }
+});
 
 /**
  * GET /system/context-usage — Get current context usage statistics

@@ -7,6 +7,7 @@ import {
   getWorkspaceRoot,
   readFile,
   writeFile,
+  forceWriteFile,
   appendFile,
   deleteFile,
   listDir,
@@ -130,6 +131,10 @@ export class SandboxManager {
 
   async writeFile(relativePath: string, content: string): Promise<void> {
     return writeFile(relativePath, content);
+  }
+
+  async forceWriteFile(relativePath: string, content: string): Promise<void> {
+    return forceWriteFile(relativePath, content);
   }
 
   async appendFile(relativePath: string, content: string): Promise<void> {

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import Uploader from '../components/chapter/Uploader';
 import ChapterList from '../components/chapter/ChapterList';
 import ChapterEditor from '../components/chapter/ChapterEditor';
@@ -24,7 +25,13 @@ export default function ChaptersPage() {
     closeConfirmDialog,
     closeAnomalyDetail,
     openEditor,
+    loadChapters,
   } = useChapters();
+
+  // 页面挂载时自动加载已有章节数据
+  useEffect(() => {
+    loadChapters();
+  }, [loadChapters]);
 
   return (
     <PageShell

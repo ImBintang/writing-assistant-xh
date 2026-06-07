@@ -1,6 +1,6 @@
 // server/src/services/splitter.ts
 
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import path from 'path';
 import { createLogger } from '../utils/logger';
 
@@ -10,8 +10,47 @@ const logger = createLogger('splitter');
 // server/src/services/splitter.ts -> monorepo_root/scripts/
 const SCRIPTS_DIR = path.resolve(__dirname, '..', '..', '..', 'scripts');
 
-// Determine Python binary
-const PYTHON_BINARY = process.platform === 'win32' ? 'python' : 'python3';
+/**
+ * Detect a working Python binary.
+ *
+ * On Windows, the Microsoft Store app execution aliases (python.exe, python3.exe)
+ * are stubs that fail with exit code 9009 when no Store-managed Python is
+ * actually installed.  We skip those stubs and prefer a real installation.
+ *
+ * An explicit PYTHON_BINARY env var always takes precedence.
+ */
+function detectPythonBinary(): string {
+  // 1. Explicit override
+  if (process.env.PYTHON_BINARY) {
+    logger.debug(`Using PYTHON_BINARY from env: ${process.env.PYTHON_BINARY}`);
+    return process.env.PYTHON_BINARY;
+  }
+
+  if (process.platform !== 'win32') {
+    return 'python3';
+  }
+
+  // 2. Windows: scan PATH for a real Python, skipping WindowsApps stubs
+  try {
+    const raw = execSync('where python 2>nul', { encoding: 'utf-8' });
+    const paths = raw
+      .split(/\r?\n/)
+      .map((p: string) => p.trim())
+      .filter((p: string) => p && !p.includes('WindowsApps'));
+
+    if (paths.length > 0) {
+      logger.debug(`Detected Python: ${paths[0]}`);
+      return paths[0];
+    }
+  } catch {
+    // 'where' returned nothing or failed — fall through to default
+  }
+
+  // 3. Last resort
+  return 'python';
+}
+
+const PYTHON_BINARY = detectPythonBinary();
 
 const SPLIT_TIMEOUT_MS = 60_000;  // 60 seconds for large files
 const VALIDATE_TIMEOUT_MS = 30_000;

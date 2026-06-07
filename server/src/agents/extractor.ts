@@ -7,7 +7,7 @@ import { getWorkspaceRoot, readFile } from '../utils/file';
 import { runExtractionWithRetry } from './client';
 import { getSkillRegistry } from './skills/registry';
 import { chunkChapter } from '../services/chunker';
-import { mergeExtractionResults } from '../services/knowledge';
+import { mergeExtractionResults, saveImportProgress, inferProgressFromKnowledge, getImportProgress } from '../services/knowledge';
 import { recordUsage } from '../utils/context';
 import type {
   ExtractionTask,
@@ -26,6 +26,203 @@ const logger = createLogger('extractor');
 export type ProgressCallback = (update: ProgressUpdate) => void;
 // Merge callback type (called after each category merge)
 export type MergeCallback = (category: string, result: MergeResult) => void;
+
+export { loadChapterContent };
+
+/**
+ * Run extraction for a single chapter (used by "import next chapter" flow).
+ * Loads chapter content, runs all skills for the given categories, returns raw entries.
+ */
+/**
+ * Run extraction + merge for a single chapter, then save import progress.
+ * Used by "import next chapter" flow (PRD-10).
+ */
+export async function importNextChapter(
+  category: string,
+  chapterIndex?: number,
+  signal?: AbortSignal,
+): Promise<{
+  result: MergeResult;
+  nextChapterIndex: number;
+  isLatest: boolean;
+  chapterTitle: string;
+}> {
+  const workspaceRoot = getWorkspaceRoot();
+
+  // 1. Read chapter meta to know total chapters and titles
+  const metaPath = path.join(workspaceRoot, 'chapters', '_meta.json');
+  let meta: { chapters: Array<{ index: number; title: string }>; totalChapters: number };
+  try {
+    const metaContent = await readFile(metaPath);
+    meta = JSON.parse(metaContent);
+  } catch {
+    throw new Error('章节数据不存在，请先上传并拆分章节文件');
+  }
+
+  if (!meta.chapters || meta.chapters.length === 0) {
+    throw new Error('没有可导入的章节');
+  }
+
+  // 2. Determine next chapter index
+  let nextIndex: number;
+  let chapterTitle: string;
+
+  if (chapterIndex) {
+    // User-specified chapter
+    const ch = meta.chapters.find((c) => c.index === chapterIndex);
+    if (!ch) {
+      throw new Error(`第${chapterIndex}章不存在`);
+    }
+    nextIndex = chapterIndex;
+    chapterTitle = ch.title;
+  } else {
+    // Auto-detect from progress or knowledge base
+    const progressList = await getImportProgress();
+    const existing = progressList.find((p) => p.category === category);
+
+    let lastImported = existing?.lastImportedChapterIndex || 0;
+
+    // Fallback: infer from knowledge base
+    if (lastImported === 0) {
+      lastImported = await inferProgressFromKnowledge(category);
+    }
+
+    nextIndex = lastImported + 1;
+
+    const ch = meta.chapters.find((c) => c.index === nextIndex);
+    if (!ch) {
+      return {
+        result: { added: [], merged: [], conflicts: [] },
+        nextChapterIndex: nextIndex,
+        isLatest: true,
+        chapterTitle: '',
+      };
+    }
+    chapterTitle = ch.title;
+  }
+
+  // 3. Load chapter content
+  const { content: chapterContent } = await loadChapterContent(nextIndex);
+
+  // 4. Run extraction for all categories (or single category)
+  const registry = getSkillRegistry();
+  const skills = registry.getSkillsByCategories([category]);
+
+  if (skills.length === 0) {
+    throw new Error(`分类 "${category}" 没有可用的提取技能`);
+  }
+
+  const allResults: Record<string, RawKnowledgeEntry[]> = {};
+  const allErrors: TaskError[] = [];
+
+  const skillPromises = skills.map(async (skill) => {
+    try {
+      const { entries, errors } = await extractWithSkill(
+        skill,
+        nextIndex,
+        chapterTitle,
+        chapterContent,
+        signal,
+      );
+      return { skill, entries, errors };
+    } catch (err) {
+      return {
+        skill,
+        entries: [] as RawKnowledgeEntry[],
+        errors: [{
+          chapterIndex: nextIndex,
+          chapterTitle,
+          category: skill.category,
+          message: err instanceof Error ? err.message : String(err),
+        }] as TaskError[],
+      };
+    }
+  });
+
+  const skillResults = await Promise.all(skillPromises);
+  for (const { skill, entries, errors } of skillResults) {
+    if (!allResults[skill.category]) allResults[skill.category] = [];
+    allResults[skill.category].push(...entries);
+    allErrors.push(...errors);
+  }
+
+  // 5. Merge results for the target category
+  const entries = allResults[category] || [];
+  let result: MergeResult = { added: [], merged: [], conflicts: [] };
+  if (entries.length > 0) {
+    result = await mergeExtractionResults(entries, category, nextIndex, chapterTitle);
+  }
+
+  // 6. Save import progress
+  await saveImportProgress({
+    category,
+    lastImportedChapterIndex: nextIndex,
+    lastImportedChapterTitle: chapterTitle,
+    importedAt: new Date().toISOString(),
+    totalChaptersAtImport: meta.totalChapters,
+  });
+
+  // 7. Check if this is the latest chapter
+  const lastChapterIndex = Math.max(...meta.chapters.map((c) => c.index));
+  const isLatest = nextIndex >= lastChapterIndex;
+
+  logger.info(
+    `Import next chapter complete: category=${category} chapter=${nextIndex} "${chapterTitle}" added=${result.added.length} merged=${result.merged.length} conflicts=${result.conflicts.length}`,
+  );
+
+  return { result, nextChapterIndex: nextIndex, isLatest, chapterTitle };
+}
+
+export async function extractSingleChapter(
+  chapterIndex: number,
+  categories: string[],
+  signal?: AbortSignal,
+): Promise<{ results: Record<string, RawKnowledgeEntry[]>; errors: TaskError[]; chapterTitle: string }> {
+  const registry = getSkillRegistry();
+  const skills = registry.getSkillsByCategories(categories);
+
+  const { content: chapterContent, title: chapterTitle } = await loadChapterContent(chapterIndex);
+
+  const allErrors: TaskError[] = [];
+  const allResults: Record<string, RawKnowledgeEntry[]> = {};
+
+  const skillPromises = skills.map(async (skill) => {
+    try {
+      const { entries, errors } = await extractWithSkill(
+        skill,
+        chapterIndex,
+        chapterTitle,
+        chapterContent,
+        signal,
+      );
+
+      return { skill, entries, errors };
+    } catch (err) {
+      return {
+        skill,
+        entries: [] as RawKnowledgeEntry[],
+        errors: [{
+          chapterIndex,
+          chapterTitle,
+          category: skill.category,
+          message: err instanceof Error ? err.message : String(err),
+        }] as TaskError[],
+      };
+    }
+  });
+
+  const skillResults = await Promise.all(skillPromises);
+
+  for (const { skill, entries, errors } of skillResults) {
+    if (!allResults[skill.category]) {
+      allResults[skill.category] = [];
+    }
+    allResults[skill.category].push(...entries);
+    allErrors.push(...errors);
+  }
+
+  return { results: allResults, errors: allErrors, chapterTitle };
+}
 
 /**
  * Read a chapter's content from disk.

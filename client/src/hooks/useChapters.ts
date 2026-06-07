@@ -118,13 +118,30 @@ export const useChapters = create<ChaptersState>((set, get) => ({
     } catch (err: any) {
       const status = err.response?.status;
       if (status === 409) {
-        const existingSourceId = err.response?.data?.existingSourceId || null;
-        set({
-          uploading: false,
-          uploadError: '该文件已上传过，拆分结果已存在。您可以继续使用已有的章节数据。',
-          uploadErrorType: 'duplicate',
-          duplicateSourceId: existingSourceId,
-        });
+        const data = err.response?.data;
+        const existingSourceId = data?.existingSourceId || null;
+
+        // 409 响应现在携带完整的已有章节数据，直接填充 store 自动恢复
+        if (data?.chapters) {
+          set({
+            uploading: false,
+            uploadError: '该文件已上传过，已自动加载已有章节数据。您可以继续使用已有的拆分结果。',
+            uploadErrorType: 'duplicate',
+            duplicateSourceId: existingSourceId,
+            chapters: data.chapters,
+            totalChapters: data.totalChapters,
+            status: data.status,
+            sourceFile: data.sourceFile,
+            anomalies: data.anomalies || [],
+          });
+        } else {
+          set({
+            uploading: false,
+            uploadError: '该文件已上传过，拆分结果已存在。您可以继续使用已有的章节数据。',
+            uploadErrorType: 'duplicate',
+            duplicateSourceId: existingSourceId,
+          });
+        }
       } else {
         const message =
           err.response?.data?.error || err.message || '上传失败';

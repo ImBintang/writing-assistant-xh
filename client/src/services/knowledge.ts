@@ -83,6 +83,17 @@ export interface ConflictRecord {
   resolved: boolean;
   resolution?: string;
   manualValue?: unknown;
+  // PRD-10
+  timeline?: Array<{
+    chapterIndex: number;
+    chapterTitle: string;
+    value: unknown;
+    recordedAt: string;
+  }>;
+  riskLevel?: 'low' | 'high';
+  riskReason?: string;
+  aiMergedText?: string;
+  suggestedAction?: 'merge' | 'manual' | 'coexist';
 }
 
 export interface CreateSkillRequest {
@@ -118,7 +129,7 @@ export type ConflictResolution = 'accept_new' | 'keep_old' | 'manual';
 
 export interface BatchResolution {
   entryId: string;
-  conflictIndex: number;
+  field: string;
   resolution: ConflictResolution;
   manualValue?: unknown;
 }
@@ -197,12 +208,12 @@ export async function fetchConflicts(): Promise<ConflictWithEntry[]> {
 
 export async function resolveConflict(
   entryId: string,
-  conflictIndex: number,
+  field: string,
   resolution: ConflictResolution,
   manualValue?: unknown,
 ): Promise<void> {
   await api.put(
-    `/api/v1/knowledge/conflicts/${entryId}/${conflictIndex}`,
+    `/api/v1/knowledge/conflicts/${entryId}/${encodeURIComponent(field)}`,
     {
       resolution,
       manualValue,
@@ -217,6 +228,110 @@ export async function batchResolveConflicts(
     resolutions,
   });
   return response.data as { resolved: number };
+}
+
+/**
+ * AI-merge merge mode
+ */
+export type AiMergeMode = 'prefer_old' | 'prefer_new' | 'balanced';
+
+/**
+ * AI-merge two conflicting text values.
+ */
+export async function aiMergeConflict(
+  oldValue: string,
+  newValue: string,
+  mode: AiMergeMode,
+): Promise<string> {
+  const response = await api.post('/api/v1/knowledge/conflicts/ai-merge', {
+    oldValue,
+    newValue,
+    mode,
+  });
+  return (response.data as { merged: string }).merged;
+}
+
+// ============================================================
+// PRD-10: Import Progress, Prescan, Coexist
+// ============================================================
+
+export interface ImportProgressInfo {
+  category: string;
+  lastImportedChapterIndex: number;
+  lastImportedChapterTitle: string;
+  importedAt: string;
+  totalChaptersAtImport: number;
+}
+
+export interface PrescanResultItem {
+  entryId: string;
+  field: string;
+  riskLevel: 'low' | 'high';
+  reason: string;
+  aiMergedText?: string;
+  suggestedAction: 'merge' | 'manual' | 'coexist';
+}
+
+export interface ImportNextChapterResult {
+  result: {
+    added: string[];
+    merged: string[];
+    conflicts: ConflictRecord[];
+  };
+  nextChapterIndex: number;
+  isLatest: boolean;
+  chapterTitle: string;
+}
+
+export async function fetchImportProgress(): Promise<ImportProgressInfo[]> {
+  const response = await api.get('/api/v1/knowledge/import-progress');
+  return (response.data as { progress: ImportProgressInfo[] }).progress;
+}
+
+export async function inferImportProgress(category: string): Promise<{ category: string; lastImportedChapterIndex: number }> {
+  const response = await api.get('/api/v1/knowledge/import-progress/infer', { params: { category } });
+  return response.data as { category: string; lastImportedChapterIndex: number };
+}
+
+export async function importNextChapter(
+  category: string,
+  chapterIndex?: number,
+): Promise<ImportNextChapterResult> {
+  const response = await api.post('/api/v1/knowledge/import-next', {
+    category,
+    chapterIndex,
+  });
+  return response.data as ImportNextChapterResult;
+}
+
+export async function prescanConflicts(entryIds?: string[]): Promise<PrescanResultItem[]> {
+  const response = await api.post('/api/v1/knowledge/conflicts/prescan', {
+    entryIds,
+  });
+  return (response.data as { results: PrescanResultItem[] }).results;
+}
+
+export async function batchMergeLowRisk(entryIds?: string[]): Promise<{ resolved: number }> {
+  const response = await api.post('/api/v1/knowledge/conflicts/batch-merge-low', {
+    entryIds,
+  });
+  return response.data as { resolved: number };
+}
+
+export async function resolveConflictCoexist(
+  entryId: string,
+  field: string,
+  data: {
+    oldChapterIndex: number;
+    oldChapterTitle: string;
+    newChapterIndex: number;
+    newChapterTitle: string;
+  },
+): Promise<void> {
+  await api.put(
+    `/api/v1/knowledge/conflicts/${entryId}/${encodeURIComponent(field)}/coexist`,
+    data,
+  );
 }
 
 // ============================================================

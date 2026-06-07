@@ -162,3 +162,31 @@ export async function fetchAnomalies(): Promise<{
   }>('/api/v1/chapters/anomalies');
   return response.data;
 }
+
+export async function exportChapters(): Promise<void> {
+  const response = await api.post(
+    '/api/v1/chapters/export',
+    {},
+    { responseType: 'blob' },
+  );
+
+  // Trigger browser download
+  const contentDisposition = response.headers?.['content-disposition'];
+  let filename = 'chapters.txt';
+  if (contentDisposition) {
+    const match = contentDisposition.match(/filename\*=UTF-8''(.+)/)
+      || contentDisposition.match(/filename="(.+)"/);
+    if (match) {
+      filename = decodeURIComponent(match[1]);
+    }
+  }
+
+  const url = URL.createObjectURL(response.data as Blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}

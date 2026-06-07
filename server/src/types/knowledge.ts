@@ -23,6 +23,40 @@ export interface ConflictRecord {
   resolved: boolean;
   resolution?: string;
   manualValue?: unknown;
+  // PRD-10: 并行共存时间线
+  timeline?: TimelineRecord[];
+  // PRD-10: 预扫描风险分级
+  riskLevel?: 'low' | 'high';
+  riskReason?: string;
+  aiMergedText?: string;
+  suggestedAction?: 'merge' | 'manual' | 'coexist';
+}
+
+// PRD-10: 并行共存时间线记录
+export interface TimelineRecord {
+  chapterIndex: number;
+  chapterTitle: string;
+  value: unknown;
+  recordedAt: string;
+}
+
+// PRD-10: 导入进度
+export interface ImportProgress {
+  category: string;
+  lastImportedChapterIndex: number;
+  lastImportedChapterTitle: string;
+  importedAt: string;
+  totalChaptersAtImport: number;
+}
+
+// PRD-10: 预扫描单个冲突结果
+export interface PrescanResult {
+  entryId: string;
+  field: string;
+  riskLevel: 'low' | 'high';
+  reason: string;
+  aiMergedText?: string;
+  suggestedAction: 'merge' | 'manual' | 'coexist';
 }
 
 export interface Relation {
@@ -230,12 +264,13 @@ export type ConflictResolution = 'accept_new' | 'keep_old' | 'manual';
 export interface ResolveConflictRequest {
   resolution: ConflictResolution;
   manualValue?: unknown;
+  field?: string;
 }
 
 export interface BatchResolveRequest {
   resolutions: Array<{
     entryId: string;
-    conflictIndex: number;
+    field: string;
     resolution: ConflictResolution;
     manualValue?: unknown;
   }>;
@@ -323,17 +358,48 @@ export const generatePromptSchema = z.object({
 export const resolveConflictSchema = z.object({
   resolution: z.enum(['accept_new', 'keep_old', 'manual']),
   manualValue: z.unknown().optional(),
+  field: z.string().optional(),
 });
 
 export const batchResolveSchema = z.object({
   resolutions: z.array(
     z.object({
       entryId: z.string(),
-      conflictIndex: z.number().int().min(0),
+      field: z.string().min(1, '字段名不能为空'),
       resolution: z.enum(['accept_new', 'keep_old', 'manual']),
       manualValue: z.unknown().optional(),
     }),
   ),
+});
+
+export const aiMergeSchema = z.object({
+  oldValue: z.string(),
+  newValue: z.string(),
+  mode: z.enum(['prefer_old', 'prefer_new', 'balanced']),
+});
+
+// PRD-10: 导入下一章
+export const importNextChapterSchema = z.object({
+  category: z.string().min(1, '分类不能为空'),
+  chapterIndex: z.number().int().positive().optional(),
+});
+
+// PRD-10: 预扫描冲突
+export const prescanSchema = z.object({
+  entryIds: z.array(z.string()).optional(),
+});
+
+// PRD-10: 批量合并低风险冲突
+export const batchMergeLowRiskSchema = z.object({
+  entryIds: z.array(z.string()).optional(),
+});
+
+// PRD-10: 并行共存
+export const coexistSchema = z.object({
+  oldChapterIndex: z.number().int().positive(),
+  oldChapterTitle: z.string(),
+  newChapterIndex: z.number().int().positive(),
+  newChapterTitle: z.string(),
 });
 
 // ============================================================

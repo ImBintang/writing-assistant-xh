@@ -291,3 +291,24 @@ export async function updateDraft(
 export async function deleteDraft(id: string): Promise<void> {
   await api.delete(`/api/v1/writing/drafts/${id}`);
 }
+
+// ============================================================
+// Chapter integration — load/save chapter content
+// ============================================================
+
+export interface ChapterDetailResponse {
+  meta: { index: number; title: string; fileName: string; lineStart: number; lineEnd: number; charCount: number };
+  content: string;
+}
+
+export async function fetchChapter(id: number): Promise<ChapterDetailResponse> {
+  const response = await api.get<ChapterDetailResponse>(`/api/v1/chapters/${id}`);
+  return response.data;
+}
+
+export async function updateChapter(
+  id: number,
+  data: { title?: string; content?: string },
+): Promise<void> {
+  await api.put(`/api/v1/chapters/${id}`, data);
+}

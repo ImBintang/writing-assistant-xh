@@ -3,6 +3,7 @@ import { useChapters } from '../../hooks/useChapters';
 import AnomalyBadge from './AnomalyBadge';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
+import { exportChapters } from '../../services/chapters';
 import type { ChapterMeta, AnomalyRecord } from '../../services/chapters';
 
 export default function ChapterList() {
@@ -117,6 +118,15 @@ export default function ChapterList() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* 导出完整 txt 按钮 */}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => { exportChapters(); }}
+            disabled={chapters.length === 0}
+          >
+            导出 txt
+          </Button>
           {!isConfirmed && chapters.length > 0 && (
             <Button onClick={openConfirmDialog} size="sm">
               确认拆分

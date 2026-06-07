@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n server,client -c blue,green \"pnpm dev:server\" \"pnpm dev:client\"",
+    "predev": "node scripts/kill-port.mjs 3000 5173",
+    "dev": "concurrently -k -n server,client -c blue,green \"pnpm dev:server\" \"pnpm dev:client\"",
+    "kill-ports": "node scripts/kill-port.mjs 3000 5173",
     "dev:server": "pnpm --filter server dev",
     "dev:client": "pnpm --filter client dev",
     "build": "pnpm --filter server build && pnpm --filter client build",

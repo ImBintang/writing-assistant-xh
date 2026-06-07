@@ -19,6 +19,9 @@ export type {
   ConflictResolution,
   BatchResolution,
   TaskError,
+  ImportProgressInfo,
+  PrescanResultItem,
+  ImportNextChapterResult,
 } from '../services/knowledge';
 
 // WebSocket disconnect reference
@@ -83,7 +86,7 @@ export interface KnowledgeState {
 
   // Actions — Conflicts
   loadConflicts: () => Promise<void>;
-  resolveConflict: (entryId: string, conflictIndex: number, resolution: knowledgeApi.ConflictResolution, manualValue?: unknown) => Promise<boolean>;
+  resolveConflict: (entryId: string, field: string, resolution: knowledgeApi.ConflictResolution, manualValue?: unknown) => Promise<boolean>;
   batchResolveConflicts: (resolutions: knowledgeApi.BatchResolution[]) => Promise<number>;
 
   // Actions — UI
@@ -93,6 +96,31 @@ export interface KnowledgeState {
   closeSkillEditor: () => void;
   openConflictResolver: (entryId?: string) => void;
   closeConflictResolver: () => void;
+
+  // PRD-10: Import progress
+  importProgress: knowledgeApi.ImportProgressInfo[];
+  importProgressLoading: boolean;
+  loadImportProgress: () => Promise<void>;
+  inferImportProgress: (category: string) => Promise<number>;
+
+  // PRD-10: Prescan & batch merge
+  prescanLoading: boolean;
+  prescanResults: knowledgeApi.PrescanResultItem[];
+  prescanConflicts: (entryIds?: string[]) => Promise<void>;
+  batchMergeLowRisk: (entryIds?: string[]) => Promise<number>;
+
+  // PRD-10: Import next chapter
+  importNextChapter: (category: string, chapterIndex?: number) => Promise<knowledgeApi.ImportNextChapterResult | null>;
+
+  // PRD-10: Coexist
+  resolveConflictCoexist: (
+    entryId: string,
+    field: string,
+    oldChapterIndex: number,
+    oldChapterTitle: string,
+    newChapterIndex: number,
+    newChapterTitle: string,
+  ) => Promise<boolean>;
 }
 
 export const CATEGORY_NAMES: Record<string, string> = {
@@ -122,6 +150,12 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
   editingSkill: null,
   conflictResolverOpen: false,
   conflictEntryId: null,
+
+  // PRD-10 initial state
+  importProgress: [],
+  importProgressLoading: false,
+  prescanLoading: false,
+  prescanResults: [],
 
   // ---- Extraction actions ----
 
@@ -297,9 +331,9 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     }
   },
 
-  resolveConflict: async (entryId, conflictIndex, resolution, manualValue) => {
+  resolveConflict: async (entryId, field, resolution, manualValue) => {
     try {
-      await knowledgeApi.resolveConflict(entryId, conflictIndex, resolution, manualValue);
+      await knowledgeApi.resolveConflict(entryId, field, resolution, manualValue);
       const conflicts = await knowledgeApi.fetchConflicts();
       set({ conflicts });
       return true;
@@ -333,6 +367,94 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     set({ conflictResolverOpen: true, conflictEntryId: entryId || null }),
   closeConflictResolver: () =>
     set({ conflictResolverOpen: false, conflictEntryId: null }),
+
+  // ---- PRD-10: Import progress ----
+
+  loadImportProgress: async () => {
+    set({ importProgressLoading: true });
+    try {
+      const progress = await knowledgeApi.fetchImportProgress();
+      set({ importProgress: progress, importProgressLoading: false });
+    } catch (err) {
+      console.error('Failed to load import progress:', err);
+      set({ importProgressLoading: false });
+    }
+  },
+
+  inferImportProgress: async (category) => {
+    try {
+      const result = await knowledgeApi.inferImportProgress(category);
+      return result.lastImportedChapterIndex;
+    } catch (err) {
+      console.error('Failed to infer import progress:', err);
+      return 0;
+    }
+  },
+
+  // ---- PRD-10: Prescan & batch merge ----
+
+  prescanConflicts: async (entryIds) => {
+    set({ prescanLoading: true });
+    try {
+      const results = await knowledgeApi.prescanConflicts(entryIds);
+      set({ prescanResults: results });
+      // Reload conflicts to get updated risk data
+      const conflicts = await knowledgeApi.fetchConflicts();
+      set({ conflicts, prescanLoading: false });
+    } catch (err) {
+      console.error('Failed to prescan conflicts:', err);
+      set({ prescanLoading: false });
+    }
+  },
+
+  batchMergeLowRisk: async (entryIds) => {
+    try {
+      const result = await knowledgeApi.batchMergeLowRisk(entryIds);
+      // Reload conflicts
+      const conflicts = await knowledgeApi.fetchConflicts();
+      set({ conflicts });
+      // Clear prescan results as they're stale
+      set({ prescanResults: [] });
+      return result.resolved;
+    } catch (err) {
+      console.error('Failed to batch merge low risk conflicts:', err);
+      return 0;
+    }
+  },
+
+  // ---- PRD-10: Import next chapter ----
+
+  importNextChapter: async (category, chapterIndex) => {
+    try {
+      const result = await knowledgeApi.importNextChapter(category, chapterIndex);
+      // Reload conflicts after import
+      const conflicts = await knowledgeApi.fetchConflicts();
+      set({ conflicts });
+      return result;
+    } catch (err) {
+      console.error('Failed to import next chapter:', err);
+      return null;
+    }
+  },
+
+  // ---- PRD-10: Coexist ----
+
+  resolveConflictCoexist: async (entryId, field, oldChapterIndex, oldChapterTitle, newChapterIndex, newChapterTitle) => {
+    try {
+      await knowledgeApi.resolveConflictCoexist(entryId, field, {
+        oldChapterIndex,
+        oldChapterTitle,
+        newChapterIndex,
+        newChapterTitle,
+      });
+      const conflicts = await knowledgeApi.fetchConflicts();
+      set({ conflicts });
+      return true;
+    } catch (err) {
+      console.error('Failed to coexist conflict:', err);
+      return false;
+    }
+  },
 }));
 
 // Backward-compatible alias

@@ -35,12 +35,111 @@ async function loadMeta(): Promise<any | null> {
 async function saveMeta(meta: any): Promise<void> {
   const sandbox = getSandbox();
   meta.updatedAt = new Date().toISOString();
-  await sandbox.writeFile('chapters/_meta.json', JSON.stringify(meta, null, 2));
+  await sandbox.forceWriteFile('chapters/_meta.json', JSON.stringify(meta, null, 2));
 }
 
 function normalizePath(...segments: string[]): string {
   // Join and replace backslashes with forward slashes for cross-platform safety
   return path.join(...segments).replace(/\\/g, '/');
+}
+
+/**
+ * Compute Levenshtein edit distance between two strings.
+ * Used for filename similarity comparison (P2).
+ */
+function levenshteinDistance(a: string, b: string): number {
+  const dp: number[][] = [];
+  for (let i = 0; i <= a.length; i++) {
+    dp[i] = [i];
+  }
+  for (let j = 0; j <= b.length; j++) {
+    dp[0][j] = j;
+  }
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]) + 1;
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+/**
+ * Compute similarity ratio between two string sequences (like difflib.SequenceMatcher).
+ * Returns a value between 0 and 1.
+ */
+function computeSequenceSimilarity(a: string[], b: string[]): number {
+  if (a.length === 0 && b.length === 0) return 1;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 0;
+
+  // Use longest common subsequence / max len as similarity metric
+  const lcs = longestCommonSubsequence(a, b);
+  return lcs / maxLen;
+}
+
+function longestCommonSubsequence(a: string[], b: string[]): number {
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () =>
+    new Array(b.length + 1).fill(0),
+  );
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+/**
+ * Compute chapter-level diff between two versions: which chapters were
+ * added, removed, or had content changed.
+ */
+function computeChapterDiff(
+  oldChapters: any[],
+  newChapters: any[],
+): { added: number[]; removed: number[]; modified: number[] } {
+  const oldTitles = new Map<string, number>();
+  for (const ch of oldChapters) {
+    oldTitles.set(ch.title?.replace(/\s+/g, '').toLowerCase() || '', ch.index);
+  }
+  const newTitles = new Map<string, number>();
+  for (const ch of newChapters) {
+    newTitles.set(ch.title?.replace(/\s+/g, '').toLowerCase() || '', ch.index);
+  }
+
+  const added: number[] = [];
+  const removed: number[] = [];
+  const modified: number[] = [];
+
+  // Find added/modified chapters
+  for (const ch of newChapters) {
+    const key = ch.title?.replace(/\s+/g, '').toLowerCase() || '';
+    if (!oldTitles.has(key)) {
+      added.push(ch.index);
+    } else {
+      // Title exists — could be modified (exact charCount comparison would require reading the file)
+      // For now mark as potentially modified if charCount differs significantly
+      const oldCh = oldChapters.find((c: any) =>
+        c.title?.replace(/\s+/g, '').toLowerCase() === key,
+      );
+      if (oldCh && Math.abs((oldCh.charCount || 0) - (ch.charCount || 0)) > 10) {
+        modified.push(ch.index);
+      }
+    }
+  }
+
+  // Find removed chapters
+  for (const ch of oldChapters) {
+    const key = ch.title?.replace(/\s+/g, '').toLowerCase() || '';
+    if (!newTitles.has(key)) {
+      removed.push(ch.index);
+    }
+  }
+
+  return { added, removed, modified };
 }
 
 // GET /anomalies — must come before /:id
@@ -86,14 +185,104 @@ router.post(
         res.status(409).json({
           error: '该文件已上传过',
           existingSourceId: existingMeta.sourceId,
+          chapters: existingMeta.chapters,
+          totalChapters: existingMeta.totalChapters,
+          status: existingMeta.status,
+          sourceFile: existingMeta.sourceFile,
+          anomalies: existingMeta.anomalies || [],
         });
         return;
       }
 
-      // Sanitize filename and prepend hash prefix
+      // Sanitize filename and prepend hash prefix (compute early — needed by both version check and upload)
       const safeName = sanitizeFilename(file.originalname);
       const storedName = `${fileHash.slice(0, 8)}_${safeName}`;
       const originalPath = normalizePath('originals', storedName);
+
+      // Check for version variant — same-novel different version (P2)
+      let versionConflict: {
+        sourceId: string;
+        similarity: number;
+        chapterDiff?: { added: number[]; removed: number[]; modified: number[] };
+      } | null = null;
+      if (existingMeta) {
+        // 1. Filename similarity via normalized edit distance
+        const normName = (s: string) =>
+          s.replace(/^[a-f0-9]{8}_/, '')  // remove hash prefix
+           .replace(/[_\-\s]\d{4,8}/g, '') // remove date-like suffixes
+           .replace(/\.[^.]*$/, '')        // remove extension
+           .toLowerCase();
+
+        const existingName = normName(existingMeta.sourceFile || '');
+        const newName = normName(file.originalname);
+
+        const nameSimilarity = existingName && newName
+          ? 1 - levenshteinDistance(existingName, newName) / Math.max(existingName.length, newName.length)
+          : 0;
+
+        if (nameSimilarity >= 0.7) {
+          // 2. Compare chapter title sequences
+          // We'll do a quick split of the new file to extract titles,
+          // then compare with existing meta titles
+          try {
+            const sandboxRoot = sandbox.getRoot();
+            const tempOriginalsDir = path.join(sandboxRoot, 'originals');
+            const tempChaptersDir = path.join(sandboxRoot, '_temp_check');
+            const tempFilePath = path.join(tempOriginalsDir, storedName);
+
+            // Write temp file for splitting
+            await sandbox.writeFile(originalPath, file.buffer.toString('utf-8'));
+            const tempMeta = await splitChapters(tempFilePath, tempChaptersDir, storedName);
+
+            if (tempMeta && tempMeta.chapters) {
+              const existingTitles = (existingMeta.chapters as any[]).map((c: any) =>
+                c.title?.replace(/\s+/g, '').toLowerCase() || '',
+              );
+              const newTitles = (tempMeta.chapters as any[]).map((c: any) =>
+                c.title?.replace(/\s+/g, '').toLowerCase() || '',
+              );
+
+              // Title sequence similarity
+              const titleSimilarity = computeSequenceSimilarity(existingTitles, newTitles);
+
+              if (titleSimilarity >= 0.6) {
+                // Compute chapter-level diff
+                const chapterDiff = computeChapterDiff(
+                  existingMeta.chapters as any[],
+                  tempMeta.chapters as any[],
+                );
+
+                versionConflict = {
+                  sourceId: existingMeta.sourceId,
+                  similarity: titleSimilarity,
+                  chapterDiff,
+                };
+              }
+            }
+
+            // Clean up temp files
+            try {
+              await sandbox.deleteFile(originalPath);
+              for (const f of await sandbox.listDir('_temp_check')) {
+                await sandbox.deleteFile(`_temp_check/${f}`);
+              }
+            } catch { /* cleanup is best-effort */ }
+          } catch {
+            // Temp split failed — fall through to normal upload
+            try { await sandbox.deleteFile(originalPath); } catch { /* ignore */ }
+          }
+        }
+
+        if (versionConflict) {
+          res.status(200).json({
+            conflict: 'version_variant',
+            existingSourceId: versionConflict.sourceId,
+            similarity: versionConflict.similarity,
+            chapterDiff: versionConflict.chapterDiff,
+          });
+          return;
+        }
+      }
 
       // Save original file to workspace/originals/
       await sandbox.writeFile(originalPath, file.buffer.toString('utf-8'));
@@ -399,6 +588,115 @@ router.post('/confirm', async (_req: Request, res: Response) => {
   } catch (err: any) {
     logger.error(`Confirm error: ${err.message}`);
     res.status(500).json({ error: `确认失败: ${err.message}` });
+  }
+});
+
+// POST /export — export all chapters as a single merged txt file (streamed)
+router.post('/export', async (_req: Request, res: Response) => {
+  try {
+    const meta = await loadMeta();
+    if (!meta || !meta.chapters || meta.chapters.length === 0) {
+      res.status(404).json({ error: '未找到章节数据，请先上传文件' });
+      return;
+    }
+
+    const sandbox = getSandbox();
+
+    // Derive filename from sourceFile, removing the hash prefix
+    const rawName = meta.sourceFile?.replace(/^[a-f0-9]{8}_/, '') || 'chapters';
+    const exportName = rawName.endsWith('.txt') ? rawName : `${rawName}.txt`;
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(exportName)}"`);
+
+    // Sort chapters by index
+    const sorted = [...meta.chapters].sort((a: any, b: any) => a.index - b.index);
+
+    // Stream chapters one by one to avoid memory buildup for large novels
+    for (const ch of sorted) {
+      try {
+        const content = await sandbox.readFile(
+          normalizePath('chapters', ch.fileName),
+        );
+        // Write chapter header separator + content
+        res.write(`\n\n第${ch.index}章 ${ch.title || ''}\n\n`);
+        res.write(content);
+      } catch {
+        logger.warn(`Chapter ${ch.index} file missing, skipping`);
+        res.write(`\n\n第${ch.index}章 ${ch.title || ''}\n\n[章节文件缺失]\n`);
+      }
+    }
+
+    res.end();
+    logger.info(`Exported ${sorted.length} chapters as ${exportName}`);
+  } catch (err: any) {
+    logger.error(`Export error: ${err.message}`);
+    if (!res.headersSent) {
+      res.status(500).json({ error: `导出失败: ${err.message}` });
+    }
+  }
+});
+
+// POST /resolve-conflict — resolve version conflict (P2)
+router.post('/resolve-conflict', async (req: Request, res: Response) => {
+  try {
+    const { action } = req.body as {
+      action: 'replace' | 'keep_both';
+    };
+
+    if (!action || !['replace', 'keep_both'].includes(action)) {
+      res.status(400).json({ error: '请提供有效的处理方式：replace 或 keep_both' });
+      return;
+    }
+
+    const meta = await loadMeta();
+    if (!meta) {
+      res.status(404).json({ error: '未找到现有章节数据' });
+      return;
+    }
+
+    if (action === 'replace') {
+      // The new upload will proceed via a subsequent normal upload call.
+      // Here we just mark the old version as to-be-replaced in versionHistory.
+      if (!meta.versionHistory) meta.versionHistory = [];
+      meta.versionHistory.push({
+        sourceFile: meta.sourceFile,
+        sourceHash: meta.sourceHash,
+        sourceId: meta.sourceId,
+        uploadedAt: meta.createdAt || meta.updatedAt,
+        action: 'replaced',
+      });
+      // Clear existing data (originals will be overwritten by new upload)
+      const sandbox = getSandbox();
+      try { await sandbox.deleteFile(normalizePath('originals', meta.sourceFile)); } catch { /* ignore */ }
+      // Reset meta — new upload will populate
+      meta.chapters = [];
+      meta.sourceFile = '';
+      meta.sourceHash = '';
+      meta.sourceId = '';
+      meta.totalChapters = 0;
+      meta.status = 'pending';
+      meta.anomalies = [];
+
+      await saveMeta(meta);
+      res.json({ status: 'ready_for_new_upload', message: '旧版本已清除，请重新上传新文件' });
+    } else if (action === 'keep_both') {
+      // Both versions coexist — the current meta stays, new upload proceeds independently.
+      // We record the current version as "kept" in history.
+      if (!meta.versionHistory) meta.versionHistory = [];
+      meta.versionHistory.push({
+        sourceFile: meta.sourceFile,
+        sourceHash: meta.sourceHash,
+        sourceId: meta.sourceId,
+        uploadedAt: meta.createdAt || meta.updatedAt,
+        action: 'kept_both',
+      });
+      await saveMeta(meta);
+      res.json({ status: 'both_kept', message: '当前版本已保留，新文件将以独立版本上传' });
+    }
+  } catch (err: any) {
+    logger.error(`Resolve conflict error: ${err.message}`);
+    res.status(500).json({ error: `冲突处理失败: ${err.message}` });
   }
 });
 

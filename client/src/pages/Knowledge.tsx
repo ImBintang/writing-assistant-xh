@@ -1,9 +1,10 @@
 // client/src/pages/Knowledge.tsx
 // Knowledge extraction page — extraction, skills, and conflict resolution
 
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useKnowledge, CATEGORY_NAMES } from '../hooks/useKnowledge';
 import { useChapters } from '../hooks/useChapters';
+import { useToast } from '../hooks/useToast';
 import ExtractTask from '../components/knowledge/ExtractTask';
 import SkillEditor from '../components/skill/SkillEditor';
 import ConflictResolver from '../components/knowledge/ConflictResolver';
@@ -34,16 +35,24 @@ export default function KnowledgePage() {
     openConflictResolver,
     closeConflictResolver,
     resetExtraction,
+    importNextChapter,
+    importProgress,
+    loadImportProgress,
   } = useKnowledge();
+  const { addToast } = useToast();
 
-  const { chapters, status: _chaptersStatus } = useChapters();
+  const { chapters, status: _chaptersStatus, loadChapters } = useChapters();
 
   useEffect(() => {
     loadSkills();
     loadConflicts();
-  }, [loadSkills, loadConflicts]);
+    loadImportProgress();
+    loadChapters();
+  }, [loadSkills, loadConflicts, loadImportProgress, loadChapters]);
 
   const confirmedChapters = chapters.length;
+  const [importingNextChapter, setImportingNextChapter] = useState(false);
+  const [inferredNextIndexByCategory, setInferredNextIndexByCategory] = useState<Record<string, number>>({});
   const isRunning = taskStatus === 'running';
 
   const totalConflicts = conflicts.reduce(
@@ -54,6 +63,117 @@ export default function KnowledgePage() {
 
   const builtInSkills = skills.filter((s: SkillInfo) => s.isBuiltIn);
   const customSkills = skills.filter((s: SkillInfo) => !s.isBuiltIn);
+  const allBuiltInCategories = builtInSkills.map((s) => s.category);
+  const allBuiltInSelected = allBuiltInCategories.length > 0
+    && allBuiltInCategories.every((cat) => selectedCategories.includes(cat));
+
+  // Compute next chapter index per category: favor importProgress, fallback to inferred from knowledge base
+  const getNextChapterIndexForCategory = useCallback((category: string): number => {
+    const fromProgress = importProgress.find((p) => p.category === category);
+    if (fromProgress && fromProgress.lastImportedChapterIndex > 0) {
+      return fromProgress.lastImportedChapterIndex + 1;
+    }
+    const fromInferred = inferredNextIndexByCategory[category];
+    if (fromInferred && fromInferred > 0) {
+      return fromInferred + 1;
+    }
+    return 1;
+  }, [importProgress, inferredNextIndexByCategory]);
+
+  // Determine next chapter index: take the max of all active categories, next = max + 1
+  const activeCategories = selectedCategories.length > 0 ? selectedCategories : allBuiltInCategories;
+  const nextChapterIndex = activeCategories.length > 0
+    ? Math.max(...activeCategories.map((cat) => getNextChapterIndexForCategory(cat)))
+    : 1;
+
+  // Inference fallback: when importProgress is empty, try knowledge base retrospection
+  useEffect(() => {
+    if (importProgress.length === 0 && allBuiltInCategories.length > 0) {
+      const doInfer = async () => {
+        const map: Record<string, number> = {};
+        for (const cat of allBuiltInCategories) {
+          try {
+            const store = useKnowledge.getState();
+            const idx = await store.inferImportProgress(cat);
+            if (idx > 0) map[cat] = idx;
+          } catch {
+            // ignore inference errors
+          }
+        }
+        if (Object.keys(map).length > 0) {
+          setInferredNextIndexByCategory(map);
+        }
+      };
+      doInfer();
+    }
+  }, [importProgress, allBuiltInCategories]);
+
+  // Check if selected category/categories are at latest
+  const isCategoryLatest = (category: string): boolean => {
+    const fromProgress = importProgress.find((p) => p.category === category);
+    if (fromProgress) {
+      return fromProgress.lastImportedChapterIndex >= fromProgress.totalChaptersAtImport;
+    }
+    return false;
+  };
+
+  const allSelectedLatest = activeCategories.length > 0 && activeCategories.every(isCategoryLatest);
+
+  const handleSelectAllBuiltIn = () => {
+    const store = useKnowledge.getState();
+    if (allBuiltInSelected) {
+      // Deselect all built-in
+      allBuiltInCategories.forEach((cat) => {
+        if (selectedCategories.includes(cat)) store.toggleCategory(cat);
+      });
+    } else {
+      // Select all built-in
+      allBuiltInCategories.forEach((cat) => {
+        if (!selectedCategories.includes(cat)) store.toggleCategory(cat);
+      });
+    }
+  };
+
+  const handleImportNextChapter = useCallback(async () => {
+    const cats = selectedCategories.length > 0
+      ? selectedCategories
+      : allBuiltInCategories;
+    if (cats.length === 0) {
+      addToast('info', '请先选择需要提取的知识分类');
+      return;
+    }
+
+    // If there are unresolved conflicts, confirm first
+    if (totalConflicts > 0) {
+      const confirmed = window.confirm(
+        `当前仍有 ${totalConflicts} 个冲突未裁决，导入下一章可能会产生新的冲突。确定要继续吗？`,
+      );
+      if (!confirmed) return;
+    }
+
+    setImportingNextChapter(true);
+    try {
+      let successCount = 0;
+      for (const cat of cats) {
+        const result = await importNextChapter(cat);
+        if (result && !result.isLatest) {
+          successCount++;
+        }
+      }
+      if (successCount > 0) {
+        addToast('success', `已导入第 ${nextChapterIndex} 章到 ${successCount} 个分类`);
+      } else {
+        addToast('info', '所有分类均已是最新章节');
+      }
+      // Reload conflicts and import progress after import
+      await loadImportProgress();
+      await loadConflicts();
+    } catch {
+      addToast('error', '导入下一章失败');
+    } finally {
+      setImportingNextChapter(false);
+    }
+  }, [selectedCategories, allBuiltInCategories, totalConflicts, importNextChapter, addToast, loadImportProgress, loadConflicts, nextChapterIndex]);
 
   const statusVariant = isRunning
     ? 'info'
@@ -130,7 +250,18 @@ export default function KnowledgePage() {
           {/* Built-in Skills */}
           {builtInSkills.length > 0 && (
             <Card padding="md">
-              <h4 className="text-sm font-semibold text-slate-800 mb-3">内置知识分类</h4>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-semibold text-slate-800">内置知识分类</h4>
+                <label className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={allBuiltInSelected}
+                    onChange={handleSelectAllBuiltIn}
+                    className="rounded text-indigo-600 focus:ring-indigo-500"
+                  />
+                  全选
+                </label>
+              </div>
               <div className="space-y-1.5">
                 {builtInSkills.map((skill: SkillInfo) => (
                   <label
@@ -197,6 +328,20 @@ export default function KnowledgePage() {
               className="w-full"
             >
               🚀 开始提取
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={handleImportNextChapter}
+              disabled={builtInSkills.length === 0 || importingNextChapter || allSelectedLatest}
+              isLoading={importingNextChapter}
+              className={`w-full ${allSelectedLatest ? 'opacity-60' : ''}`}
+              title={allSelectedLatest ? '所有分类均已是最新章节，无需导入' : undefined}
+            >
+              {importingNextChapter
+                ? '导入中…'
+                : allSelectedLatest
+                  ? '已是最新章节 ✓'
+                  : `提取下一章（第 ${nextChapterIndex} 章）`}
             </Button>
             <Button
               variant="secondary"

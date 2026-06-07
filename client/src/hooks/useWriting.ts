@@ -15,6 +15,8 @@ import {
   createDraft,
   updateDraft,
   deleteDraft,
+  fetchChapter as fetchChapterApi,
+  updateChapter as updateChapterApi,
   type PriorKnowledge,
   type DiffItem,
   type ForeshadowFinding,
@@ -30,6 +32,10 @@ interface WritingState {
   draftId: string | null;
   title: string;
   targetChapter: number | null;
+
+  // Edition source: whether we're editing a draft or an existing chapter
+  editSource: 'draft' | 'chapter';
+  linkedChapterIndex: number | null;
 
   // Content (synced with TipTap editors)
   outline: string;
@@ -121,6 +127,14 @@ interface WritingState {
   closeDraftManager: () => void;
 
   // ============================================================
+  // Actions — Chapter integration
+  // ============================================================
+  /** 从章节系统中加载已有章节到写文编辑器 */
+  loadChapter: (chapterIndex: number) => Promise<void>;
+  /** 将当前编辑内容保存回章节系统 */
+  saveToChapter: () => Promise<void>;
+
+  // ============================================================
   // Actions — UI
   // ============================================================
   toggleDrawer: () => void;
@@ -146,6 +160,8 @@ export const useWriting = create<WritingState>((set, get) => ({
   draftId: null,
   title: '',
   targetChapter: null,
+  editSource: 'draft',
+  linkedChapterIndex: null,
   outline: '',
   body: '',
   mode: 'outline',
@@ -624,7 +640,24 @@ export const useWriting = create<WritingState>((set, get) => ({
   },
 
   saveDraft: async () => {
-    const { draftId, title, targetChapter, outline, body, priorKnowledge } = get();
+    const { draftId, title, targetChapter, outline, body, priorKnowledge, editSource, linkedChapterIndex } = get();
+
+    // If editing a linked chapter (not a draft), save to chapter system
+    if (editSource === 'chapter' && linkedChapterIndex !== null) {
+      try {
+        if (!body.trim()) return; // Don't save empty body
+        await updateChapterApi(linkedChapterIndex, { title, content: body });
+        set({
+          lastSavedAt: new Date().toISOString(),
+          isDirty: false,
+          lastSavedOutline: outline,
+          lastSavedBody: body,
+        });
+      } catch (err: any) {
+        console.error('Failed to save to chapter:', err);
+      }
+      return;
+    }
 
     try {
       if (draftId) {
@@ -673,6 +706,8 @@ export const useWriting = create<WritingState>((set, get) => ({
       draftId: draft.id,
       title: draft.title,
       targetChapter: draft.targetChapter,
+      editSource: 'draft',
+      linkedChapterIndex: null,
       outline: draft.outline,
       body: draft.draft,
       priorKnowledge: draft.priorKnowledge || null,
@@ -693,6 +728,9 @@ export const useWriting = create<WritingState>((set, get) => ({
         set({
           draftId: null,
           title: '',
+          targetChapter: null,
+          editSource: 'draft',
+          linkedChapterIndex: null,
           outline: '',
           body: '',
           priorKnowledge: null,
@@ -711,6 +749,8 @@ export const useWriting = create<WritingState>((set, get) => ({
       draftId: null,
       title: '',
       targetChapter: null,
+      editSource: 'draft',
+      linkedChapterIndex: null,
       outline: '',
       body: '',
       priorKnowledge: null,
@@ -731,6 +771,49 @@ export const useWriting = create<WritingState>((set, get) => ({
 
   closeDraftManager: () => {
     set({ draftManagerOpen: false });
+  },
+
+  // ============================================================
+  // Chapter integration
+  // ============================================================
+
+  loadChapter: async (chapterIndex: number) => {
+    try {
+      const result = await fetchChapterApi(chapterIndex);
+      set({
+        draftId: null,
+        editSource: 'chapter',
+        linkedChapterIndex: chapterIndex,
+        targetChapter: chapterIndex,
+        title: result.meta.title || '',
+        body: result.content,
+        outline: '',
+        mode: 'body',
+        showDiff: false,
+        isDirty: false,
+        lastSavedAt: null,
+        lastSavedOutline: '',
+        lastSavedBody: result.content,
+      });
+    } catch (err: any) {
+      console.error('Failed to load chapter:', err);
+    }
+  },
+
+  saveToChapter: async () => {
+    const { linkedChapterIndex, title, body } = get();
+    if (linkedChapterIndex === null) return;
+
+    try {
+      await updateChapterApi(linkedChapterIndex, { title, content: body });
+      set({
+        lastSavedAt: new Date().toISOString(),
+        isDirty: false,
+        lastSavedBody: body,
+      });
+    } catch (err: any) {
+      console.error('Failed to save to chapter:', err);
+    }
   },
 
   // ============================================================

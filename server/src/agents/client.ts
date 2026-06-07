@@ -5,6 +5,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createLogger } from '../utils/logger';
+import { getEffectiveApiKey } from '../utils/apiKeys';
 import {
   defaultConfig,
   defaultPresets,
@@ -45,7 +46,7 @@ export interface ChatParams {
     description: string;
     inputSchema: Record<string, unknown>;
   }>;
-  toolChoice?: { type: 'tool'; name: string };
+  toolChoice?: { type: 'tool'; name: string } | { type: 'auto' };
   signal?: AbortSignal;
 }
 
@@ -65,25 +66,42 @@ export interface AiProvider {
 
 // ==================== Claude Provider (Anthropic) ====================
 
-let anthropicClient: Anthropic | null = null;
+let anthropicClientCache: { client: Anthropic; baseUrl?: string } | null = null;
 
-function getAnthropicClient(): Anthropic {
-  if (!anthropicClient) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      throw new Error('ANTHROPIC_API_KEY environment variable is not set');
-    }
-    anthropicClient = new Anthropic({ apiKey });
-    logger.info('Anthropic client initialized');
+function getAnthropicClient(baseUrl?: string): Anthropic {
+  // Return cached client if baseUrl matches
+  if (anthropicClientCache && anthropicClientCache.baseUrl === baseUrl) {
+    return anthropicClientCache.client;
   }
-  return anthropicClient;
+
+  const apiKey = getEffectiveApiKey('ANTHROPIC_API_KEY');
+  if (!apiKey) {
+    throw new Error('ANTHROPIC_API_KEY environment variable is not set');
+  }
+
+  const opts: { apiKey: string; baseURL?: string } = { apiKey };
+  if (baseUrl) {
+    opts.baseURL = baseUrl;
+  }
+
+  anthropicClientCache = { client: new Anthropic(opts), baseUrl };
+  logger.info(baseUrl ? `Anthropic client initialized with baseUrl: ${baseUrl}` : 'Anthropic client initialized');
+  return anthropicClientCache.client;
 }
 
 class ClaudeProvider implements AiProvider {
   readonly name = 'claude';
+  private baseUrl?: string;
+  /** Whether the backend is known to force thinking mode on. Set per preset's `thinkingEnabled` field. */
+  private thinkingEnabled?: boolean;
+
+  constructor(baseUrl?: string, thinkingEnabled?: boolean) {
+    this.baseUrl = baseUrl;
+    this.thinkingEnabled = thinkingEnabled;
+  }
 
   async chat(params: ChatParams): Promise<ChatResult> {
-    const client = getAnthropicClient();
+    const client = getAnthropicClient(this.baseUrl);
 
     // Convert unified tools to Anthropic format
     const anthropicTools = params.tools?.map((t) => ({
@@ -92,40 +110,77 @@ class ClaudeProvider implements AiProvider {
       input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
     }));
 
-    const response = await client.messages.create(
-      {
-        model: params.model,
-        max_tokens: params.maxTokens,
-        temperature: params.temperature,
-        system: params.system,
-        messages: params.messages.map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        })),
-        ...(anthropicTools ? { tools: anthropicTools } : {}),
-        ...(params.toolChoice
-          ? { tool_choice: params.toolChoice as Anthropic.MessageCreateParams['tool_choice'] }
-          : {}),
-      },
-      { signal: params.signal },
-    );
+    // Build the request body without tool_choice first, so we can retry with
+    // a downgraded tool_choice on "thinking mode does not support" errors.
+    const buildRequestBody = (
+      toolChoice: ChatParams['toolChoice'],
+    ): Anthropic.MessageCreateParams => ({
+      model: params.model,
+      max_tokens: params.maxTokens,
+      temperature: params.temperature,
+      system: params.system,
+      messages: params.messages.map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      })),
+      ...(anthropicTools ? { tools: anthropicTools } : {}),
+      ...(toolChoice
+        ? { tool_choice: toolChoice as Anthropic.MessageCreateParams['tool_choice'] }
+        : {}),
+      ...(this.thinkingEnabled === false
+        ? { thinking: { type: 'disabled' as const } }
+        : {}),
+    });
 
-    // Convert Anthropic response blocks to unified format
-    const content: ContentBlock[] = response.content.map((block) => {
-      if (block.type === 'text') {
-        return { type: 'text', text: block.text };
+    let toolChoice: ChatParams['toolChoice'] | undefined = params.toolChoice;
+
+    const response = (await (async () => {
+      try {
+        return await client.messages.create(buildRequestBody(toolChoice), {
+          signal: params.signal,
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const specificName =
+          toolChoice?.type === 'tool' && 'name' in toolChoice ? toolChoice.name : undefined;
+
+        // Detect thinking-mode / tool_choice incompatibility.
+        // Some backends (e.g. DeepSeek) force thinking on and reject
+        // { type: 'tool', name: '...' }.  Fall back to { type: 'auto' }.
+        if (
+          specificName &&
+          (msg.includes('Thinking mode does not support this tool_choice') ||
+            msg.includes('does not support this tool_choice'))
+        ) {
+          logger.warn(
+            `tool_choice={type:'tool',name:'${specificName}'} rejected (thinking mode), retrying with tool_choice={type:'auto'}`,
+          );
+          toolChoice = { type: 'auto' };
+          return await client.messages.create(buildRequestBody(toolChoice), {
+            signal: params.signal,
+          });
+        }
+
+        throw err;
       }
-      if (block.type === 'tool_use') {
-        return {
+    })()) as Anthropic.Message;
+
+    // Convert Anthropic response blocks to unified format.
+    // Skip non-text/non-tool_use blocks (e.g. 'thinking') instead of
+    // emitting empty text blocks that would shadow real text responses.
+    const content: ContentBlock[] = [];
+    for (const block of response.content) {
+      if (block.type === 'text') {
+        content.push({ type: 'text', text: block.text });
+      } else if (block.type === 'tool_use') {
+        content.push({
           type: 'tool_use',
           id: block.id,
           name: block.name,
           input: block.input as Record<string, unknown>,
-        };
+        });
       }
-      // Unknown block type — skip
-      return { type: 'text', text: '' };
-    });
+    }
 
     return {
       content,
@@ -165,14 +220,15 @@ class OllamaProvider implements AiProvider {
 
 const providerCache = new Map<string, AiProvider>();
 
-function getProvider(providerType: string): AiProvider {
-  const cached = providerCache.get(providerType);
+export function getProvider(providerType: string, baseUrl?: string, thinkingEnabled?: boolean): AiProvider {
+  const cacheKey = `${providerType}:${baseUrl || ''}:${thinkingEnabled ?? ''}`;
+  const cached = providerCache.get(cacheKey);
   if (cached) return cached;
 
   let provider: AiProvider;
   switch (providerType) {
     case 'claude':
-      provider = new ClaudeProvider();
+      provider = new ClaudeProvider(baseUrl, thinkingEnabled);
       break;
     case 'openai':
       provider = new OpenAIProvider();
@@ -184,7 +240,7 @@ function getProvider(providerType: string): AiProvider {
       throw new Error(`Unknown AI provider type: ${providerType}`);
   }
 
-  providerCache.set(providerType, provider);
+  providerCache.set(cacheKey, provider);
   return provider;
 }
 
@@ -248,6 +304,17 @@ export function invalidateModelCache(): void {
   allPresetsCache = null;
   functionMappingCache = null;
   providerCache.clear();
+  invalidateAnthropicClient();
+}
+
+/**
+ * Invalidate the cached Anthropic client instance.
+ * Forces the next AI call to re-read API key and create a new client.
+ * Called automatically by invalidateModelCache() after config saves.
+ */
+export function invalidateAnthropicClient(): void {
+  anthropicClientCache = null;
+  logger.info('Anthropic client invalidated');
 }
 
 /**
@@ -263,7 +330,7 @@ export function invalidateModelCache(): void {
  */
 export async function resolveModel(
   mode: string,
-): Promise<{ modelId: string; providerName: string; presetId: string }> {
+): Promise<{ modelId: string; providerName: string; presetId: string; baseUrl?: string; thinkingEnabled?: boolean }> {
   const mapping = await getFunctionMapping();
   const presetId = mapping[mode] || defaultConfig.models.default;
 
@@ -283,6 +350,8 @@ export async function resolveModel(
       modelId: fallback.modelId,
       providerName: fallback.provider,
       presetId: fallback.id,
+      baseUrl: fallback.baseUrl,
+      thinkingEnabled: (fallback as ModelPreset).thinkingEnabled,
     };
   }
 
@@ -290,6 +359,8 @@ export async function resolveModel(
     modelId: preset.modelId,
     providerName: preset.provider,
     presetId: preset.id,
+    baseUrl: preset.baseUrl,
+    thinkingEnabled: preset.thinkingEnabled,
   };
 }
 
@@ -302,8 +373,8 @@ export async function getProviderForMode(mode: string): Promise<{
   modelId: string;
   presetId: string;
 }> {
-  const { modelId, providerName, presetId } = await resolveModel(mode);
-  const provider = getProvider(providerName);
+  const { modelId, providerName, presetId, baseUrl, thinkingEnabled } = await resolveModel(mode);
+  const provider = getProvider(providerName, baseUrl, thinkingEnabled);
   return { provider, modelId, presetId };
 }
 
@@ -442,13 +513,19 @@ export async function runExtractionWithRetry(
 
       if (lastError.name === 'AbortError') throw lastError;
 
-      const statusMatch = lastError.message.match(/status: (\d+)/);
-      if (statusMatch) {
-        const status = parseInt(statusMatch[1], 10);
-        if (status >= 400 && status < 500) {
-          logger.warn(`Non-retryable error (${status}), not retrying`);
-          throw lastError;
-        }
+      // Detect HTTP 4xx errors — these are client errors, not worth retrying.
+      // Anthropic SDK error format: "400 {"error": {...}}"
+      // Other proxy formats: "status: 400"
+      const statusMatch = lastError.message.match(/status:\s*(\d+)/i);
+      const sdkMatch = lastError.message.match(/^(\d{3})\s/);
+      const httpStatus = statusMatch
+        ? parseInt(statusMatch[1], 10)
+        : sdkMatch
+          ? parseInt(sdkMatch[1], 10)
+          : null;
+      if (httpStatus !== null && httpStatus >= 400 && httpStatus < 500) {
+        logger.warn(`Non-retryable HTTP error (${httpStatus}), not retrying`);
+        throw lastError;
       }
 
       if (attempt < maxRetries) {

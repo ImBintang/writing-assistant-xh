@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { ToastContainer } from './components/ui/Toast';
 
 const NAV_ITEMS = [
   { to: '/', label: '首页', exact: true },
@@ -116,6 +117,9 @@ export default function App() {
       <main className="flex-1">
         <Outlet />
       </main>
+
+      {/* Toast notifications */}
+      <ToastContainer />
     </div>
   );
 }
